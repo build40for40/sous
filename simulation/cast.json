@@ -1,0 +1,42 @@
+{
+  "_note": "Four simulated Sous users. Each follows three Instagram chefs and saves three of their posts to Sous, either with the share button (main path) or by DM'ing @sous (secondary path). Overlaps are deliberate: Ben (DM) sends two of the Sivan's Kitchen posts Samira (share button) saved, and Matt sends one of Ben's barefoodtim posts, to test that a post is fetched and extracted once whichever way it arrives. Samira also saves one post twice, to test duplicate handling.",
+  "users": [
+    {
+      "name": "Samira",
+      "saves_via": "share_button",
+      "follows": {
+        "feelgoodfoodie": ["reel/DTwZpo5DNVr", "reel/DVKgkKPDCjr", "reel/DfORo6hRYny"],
+        "sivanskitchen": ["reel/DfTG7aHv1Wn", "reel/DfVr002PvI-", "reel/De-ZeM9POHt"],
+        "fromscratchwithbob": ["reel/DdJLdRwOkZ3", "reel/DclEvxoORVU", "reel/Da2OSYjOvrB"]
+      },
+      "resends": ["reel/DTwZpo5DNVr"]
+    },
+    {
+      "name": "Ben",
+      "saves_via": "dm",
+      "follows": {
+        "sivanskitchen": ["reel/DfTG7aHv1Wn", "reel/De-ZeM9POHt", "reel/Depy8xmvEGE"],
+        "barefoodtim": ["reel/DehfZkuJzyt", "reel/DfU2Kq3JyMR", "reel/DeZf0saOjLB"],
+        "nick.digiovanni": ["reel/DY7at0aNs4S", "reel/DZISw_yNLQq", "reel/DYpZA9INHng"]
+      }
+    },
+    {
+      "name": "Lawrence",
+      "saves_via": "share_button",
+      "follows": {
+        "halfbakedharvest": ["reel/DfQ0z7wB0Wv", "reel/DfV_arWgXno", "reel/DfI_BlsBHj8"],
+        "emthenutritionist": ["reel/DfXpO7TokQv", "reel/DeruSjcoJvE", "reel/DewzcpmoEDP"],
+        "kierans__kitchen": ["p/DdoQSMHtasl", "p/DZSnMAqtbRN", "reel/Ddq5-XZtHAo"]
+      }
+    },
+    {
+      "name": "Matt",
+      "saves_via": "dm",
+      "follows": {
+        "barefoodtim": ["reel/DehfZkuJzyt", "reel/DfHya3HsegL", "reel/DeHaGZ2On6H"],
+        "buzzfeedtasty": ["reel/DfVUc7PB1dv", "reel/DfX5SSihhfM", "reel/DfVDUdOhvKe"],
+        "amauryguichon": ["reel/DfPrpAzOmfI", "reel/De9gs1YOjOV", "reel/DeZf8flO9zT"]
+      }
+    }
+  ]
+}
