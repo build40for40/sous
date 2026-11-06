@@ -235,7 +235,7 @@ void main() {
       },
     );
 
-    test('"stop" cuts Sous off and cancels the reply', () async {
+    test('"Hold" silences Sous and the reply still finishes', () async {
       await loop.start();
       await playOut();
       final slow = SlowReply();
@@ -246,28 +246,47 @@ void main() {
       await pumpEventQueue();
       expect(audio.isPlaying, isTrue);
 
-      stt.hear('Sous, stop!');
+      stt.hear('Hold, Chef!');
       await pumpEventQueue();
 
       expect(audio.isPlaying, isFalse);
       expect(audio.stops, greaterThan(0));
-      expect(session.state.phase, CookingPhase.ready);
-      expect(brain.turns, hasLength(1));
+      expect(session.state.phase, CookingPhase.replying);
 
       slow.send(text('Never spoken.'));
+      slow.send(done('end_turn'));
+      await slow.close();
       await pumpEventQueue();
       expect(tts.said, isNot(contains('Never spoken.')));
+      expect(session.state.phase, CookingPhase.ready);
+      expect(session.state.reply, endsWith('Never spoken.'));
+      expect(brain.turns, hasLength(1));
       expect(loop.state.status, VoiceStatus.listening);
-      await slow.close();
     });
 
-    test('a tap interrupts too', () async {
+    test('a tap on the flame silences Sous', () async {
       await loop.start();
       await pumpEventQueue();
       expect(audio.isPlaying, isTrue);
-      await loop.interrupt();
+      await loop.silence();
       expect(audio.isPlaying, isFalse);
       expect(loop.state.status, VoiceStatus.listening);
+    });
+
+    test('interrupt also cancels the reply that is streaming', () async {
+      await loop.start();
+      await playOut();
+      final slow = SlowReply();
+      brain.replies.add(slow.response);
+      stt.hear('Next step?');
+      await pumpEventQueue();
+      slow.send(text('Now drain the pasta. Keep a mug of the water. '));
+      await pumpEventQueue();
+
+      await loop.interrupt();
+      expect(audio.isPlaying, isFalse);
+      expect(session.state.phase, CookingPhase.ready);
+      await slow.close();
     });
 
     test('can stop listening altogether while Sous speaks', () async {
@@ -287,40 +306,41 @@ void main() {
   group('full duplex', () {
     setUp(() => loop = build(const VoiceLoopSettings(duplex: DuplexMode.full)));
 
-    test(
-      'the cook talking over Sous cuts in and becomes the next turn',
-      () async {
-        await loop.start();
-        await playOut();
-        final slow = SlowReply();
-        brain.replies.add(slow.response);
-        stt.hear('Next step?');
-        await pumpEventQueue();
-        slow.send(text('Now drain the pasta. Keep a mug of the water. '));
-        await pumpEventQueue();
-        expect(audio.isPlaying, isTrue);
+    test('the chef talking over Sous cuts in, and is heard once the reply '
+        'is done', () async {
+      await loop.start();
+      await playOut();
+      final slow = SlowReply();
+      brain.replies.add(slow.response);
+      stt.hear('Next step?');
+      await pumpEventQueue();
+      slow.send(text('Now drain the pasta. Keep a mug of the water. '));
+      await pumpEventQueue();
+      expect(audio.isPlaying, isTrue);
 
-        stt.startTalking();
-        await pumpEventQueue();
-        expect(audio.isPlaying, isFalse);
-        expect(session.state.phase, CookingPhase.ready);
-        expect(loop.state.status, VoiceStatus.hearing);
+      stt.startTalking();
+      await pumpEventQueue();
+      expect(audio.isPlaying, isFalse);
+      expect(loop.state.status, VoiceStatus.hearing);
 
-        brain.busy = 1;
-        brain.replies.add([text('The big pan.'), done('end_turn')]);
-        stt.finishTalking('Wait, which pan?');
-        await pumpEventQueue();
-        await pumpEventQueue();
+      stt.finishTalking('Which pan?');
+      await pumpEventQueue();
+      expect(brain.turns, hasLength(1));
+      expect(loop.state.status, VoiceStatus.thinking);
 
-        expect(brain.turns.last, {'text': 'Wait, which pan?'});
-        expect(tts.said.last, 'The big pan.');
-        await playOut();
-        await slow.close();
-      },
-    );
+      brain.replies.add([text('The big pan.'), done('end_turn')]);
+      slow.send(done('end_turn'));
+      await slow.close();
+      await pumpEventQueue();
+      await pumpEventQueue();
+
+      expect(brain.turns.last, {'text': 'Which pan?'});
+      expect(tts.said.last, 'The big pan.');
+      await playOut();
+    });
   });
 
-  test('talking while Sous is still thinking replaces the question', () async {
+  test('talking while Sous is still thinking waits for the reply', () async {
     await loop.start();
     await playOut();
     final slow = SlowReply();
@@ -329,8 +349,14 @@ void main() {
     await pumpEventQueue();
     expect(session.state.phase, CookingPhase.thinking);
 
-    brain.replies.add([text('Twelve minutes.'), done('end_turn')]);
     stt.hear('Basmati, I mean.');
+    await pumpEventQueue();
+    expect(brain.turns, hasLength(1));
+
+    brain.replies.add([text('Twelve minutes for basmati.'), done('end_turn')]);
+    slow.send(text('About fifteen minutes.'));
+    slow.send(done('end_turn'));
+    await slow.close();
     await pumpEventQueue();
     await pumpEventQueue();
 
@@ -338,9 +364,29 @@ void main() {
       'How long for the rice?',
       'Basmati, I mean.',
     ]);
-    expect(tts.said.last, 'Twelve minutes.');
+    expect(tts.said, contains('About fifteen minutes.'));
+    expect(tts.said.last, 'Twelve minutes for basmati.');
     await playOut();
-    await slow.close();
+  });
+
+  test('knows the stop words', () {
+    for (final phrase in [
+      'Stop.',
+      'Hold',
+      'Wait, Chef',
+      'Hey Sous',
+      'hang on',
+    ]) {
+      expect(isStopCommand(phrase), isTrue, reason: phrase);
+    }
+    for (final phrase in [
+      'Stop the timer',
+      'Yes, Chef',
+      'Heard',
+      'Wait for it to boil',
+    ]) {
+      expect(isStopCommand(phrase), isFalse, reason: phrase);
+    }
   });
 
   test('empty transcripts are ignored', () async {

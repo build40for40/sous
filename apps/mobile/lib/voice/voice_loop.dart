@@ -12,12 +12,12 @@ import 'text_to_speech.dart';
 /// How Sous handles the cook talking while Sous is talking.
 enum DuplexMode {
   /// Sous doesn't take what it hears while speaking as a new turn, since that
-  /// is mostly its own voice coming back. Tap ([VoiceLoop.interrupt]) or say
-  /// "stop" to cut Sous off.
+  /// is mostly its own voice coming back. A tap ([VoiceLoop.silence]) or
+  /// "Hold", "Wait", "Stop" or "Hey Sous" cut Sous off.
   half,
 
   /// The mic stays open while Sous speaks and any speech cuts Sous off
-  /// (barge-in). Needs echo cancellation that really takes Sous's voice out of
+  /// (barge-in), then goes to Sous once its reply is done. Needs echo cancellation that really takes Sous's voice out of
   /// the mic, or Sous keeps interrupting itself.
   full,
 }
@@ -92,7 +92,7 @@ class VoiceLoopSettings {
 
 /// The spoken conversation: hears the cook, sends what they said to the
 /// [CookingSession], speaks Sous's reply sentence by sentence while it
-/// streams, and handles the cook cutting in. Works with any [AudioIO],
+/// streams, and stops when the chef cuts in. Works with any [AudioIO],
 /// [SpeechToText] and [TextToSpeech].
 class VoiceLoop {
   VoiceLoop({
@@ -181,8 +181,18 @@ class VoiceLoop {
     _emit(const VoiceState());
   }
 
-  /// Cuts Sous off: stops speaking and cancels the reply that's streaming.
-  /// For a tap on the screen, and what barge-in does.
+  /// Stops Sous mid-sentence: a tap on the flame, or the chef saying "Hold",
+  /// "Wait", "Stop" or "Hey Sous". The rest of this reply isn't spoken, but
+  /// the brain still finishes it, so timers and steps in it still happen.
+  Future<void> silence() async {
+    _muted = true;
+    _splitter.clear();
+    await _stopSpeaking();
+    _update();
+  }
+
+  /// [silence], and also cancels the reply that's streaming
+  /// ([CookingSession.interrupt]), for when it should be abandoned.
   Future<void> interrupt() async {
     _muted = true;
     _splitter.clear();
@@ -238,7 +248,7 @@ class VoiceLoop {
         _hearing = true;
         _overlapsSous = _sousAudible;
         if (settings.duplex == DuplexMode.full && _sousSpeaking) {
-          unawaited(interrupt());
+          unawaited(silence());
         }
       case PartialTranscript(:final text):
         _emit(_copy(partial: text));
@@ -252,15 +262,16 @@ class VoiceLoop {
     _update();
   }
 
+  /// Stop words silence Sous. Anything else goes to Sous once it has
+  /// finished the reply it's on, so nothing it was doing gets skipped.
   void _onUtterance(String text, bool overlapsSous) {
     if (text.isEmpty) return;
-    final busy = _sousSpeaking || _sessionBusy;
-    if (busy && isStopCommand(text)) {
-      unawaited(interrupt());
+    if ((_sousSpeaking || _sessionBusy) && isStopCommand(text)) {
+      unawaited(silence());
       return;
     }
     if (overlapsSous && settings.duplex == DuplexMode.half) return;
-    if (busy) unawaited(interrupt());
+    if (_sousSpeaking) unawaited(silence());
     _pending = _pending == null ? text : '$_pending $text';
     _sendPending();
   }
@@ -392,9 +403,22 @@ bool isStopCommand(String text) {
   return _stopPhrases.contains(words);
 }
 
-const _fillers = {'sous', 'sue', 'please', 'ok', 'okay', 'oh', 'um', 'uh'};
+const _fillers = {
+  'sous',
+  'sue',
+  'chef',
+  'please',
+  'ok',
+  'okay',
+  'oh',
+  'um',
+  'uh',
+};
 
 const _stopPhrases = {
+  'hey',
+  'hold',
+  'hold it',
   'stop',
   'stop stop',
   'stop it',
