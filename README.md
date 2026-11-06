@@ -6,7 +6,7 @@ Day 5 of 40 for 40: a screen-free sous chef that talks you through the recipes y
 
 ```
 apps/mobile/          Flutter app
-workers/brain/        Worker and UserBrain Durable Object: auth, /me, /recipes, live cooking sessions and post-cook reflection
+workers/brain/        Worker and UserBrain Durable Object: auth, /me, /recipes, live cooking sessions, post-cook reflection, /history and /suggest
 workers/web/          landing page at build40for40.com/sous (empty)
 workers/extract/      extraction, if it needs a server (empty)
 packages/contracts/   recipe and session JSON Schemas and the cooking tools

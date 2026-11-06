@@ -14,7 +14,7 @@ const MAX_TURN_BYTES = 32 * 1024;
 
 // The generated stub types recurse too deeply on JSON preferences, so the stub is typed from the class directly.
 type Rpc<T> = { [K in keyof T]: T[K] extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never };
-type Brain = Rpc<Pick<UserBrain, "getProfile" | "updateProfile" | "wipe" | "listRecipes" | "getRecipe" | "createRecipe" | "deleteRecipe" | "createSession" | "takeTurn" | "endSession" | "getSession">>;
+type Brain = Rpc<Pick<UserBrain, "getProfile" | "updateProfile" | "wipe" | "listRecipes" | "getRecipe" | "createRecipe" | "deleteRecipe" | "createSession" | "takeTurn" | "endSession" | "getSession" | "listHistory" | "suggest">>;
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -66,6 +66,19 @@ async function route(request: Request, path: string, userId: string, brain: Brai
     }
     if (method === "DELETE") return (await brain.deleteRecipe(id)) ? new Response(null, { status: 204 }) : error(404, "recipe_not_found");
     return methodNotAllowed("GET, DELETE");
+  }
+
+  if (path === "/history") {
+    if (method !== "GET") return methodNotAllowed("GET");
+    return json({ cooks: await brain.listHistory() });
+  }
+
+  if (path === "/suggest") {
+    if (method !== "GET") return methodNotAllowed("GET");
+    const suggestions = await brain.suggest();
+    if (suggestions === "suggestions_unavailable") return error(503, suggestions);
+    if (suggestions === "suggestions_failed") return error(502, suggestions);
+    return json({ suggestions });
   }
 
   if (path === "/sessions") {

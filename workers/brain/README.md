@@ -18,6 +18,8 @@ Everything lives under `/sous/api/v1` and needs a WorkOS access token as `Author
 | `POST /sessions` | `{recipe_id}`. Starts a live cooking session: `201 {id, recipe_id, stage, started_at, opening_line}`, or `404` for an unknown recipe |
 | `POST /sessions/:id/turns` | a `TurnRequest` from `packages/contracts`. Streams Sou's reply as server-sent events (`text`, `tool_call`, then `done` or `error`). `409 tool_results_required` lists the tool call ids still owed, `409 session_ended`, `409 turn_in_progress` |
 | `POST /sessions/:id/end` | `{rating?, notes?}` (rating 1 to 5, notes up to 4,000 characters; the body can be empty). Closes the session and queues its reflection: `202 {id, ended_at, rating?, notes?, reflection_status: "pending"}`. `409 session_ended`, `409 turn_in_progress`, `404` |
+| `GET /history` | `{cooks}`: every finished cook, newest first (up to 200), each `{session_id, recipe_id, recipe_title, started_at, ended_at, date, rating, summary, reflection_status}`. A plain SQL read, no model call. `date` is the London day, `rating` is the cook's own or the reflection's read of it (null if neither), `recipe_title` is null if the recipe has since been deleted |
+| `GET /suggest` | "what should I cook?": `{suggestions}`, up to five `{recipe_id, title, reason}`, best first, only from the user's saved recipes. `503 suggestions_unavailable` without the Anthropic key, `502 suggestions_failed` if Claude is down or its answer is unusable (safe to retry) |
 | `GET /sessions/:id` | `{session, reflection, reflection_status, reflected_at}`. `session` is a contract `Session` (the transcript, facts, rating and notes); `reflection` is null until it's done. `reflection_status` is `not_ended`, `pending`, `done` or `failed` |
 
 ## Live cooking sessions
@@ -40,6 +42,19 @@ A turn is saved only once the reply finishes, so after an `error` event the cook
 Every per-cook line carries the session's `[[wikilink]]`, and a rerun replaces that session's lines rather than adding more, so reflecting twice changes nothing. After writing, `links` is rebuilt from every note's `[[wikilinks]]` (`src/wikilinks.ts`), with the link's `kind` taken from the folder it points into. The next `POST /sessions` for that recipe picks all of it up through context assembly.
 
 If Claude is down or rate limited the alarm throws and Cloudflare retries it with backoff; a later `/end` also picks up anything still pending. A refusal or output that doesn't fit the schema won't improve on retry, so it's saved as `reflection_error` and the session shows `failed`. Each reflection logs a `sous_reflection` line with its timing and token usage.
+
+## History and suggestions
+
+`GET /history` (`src/history.ts`) reads the `sessions` table joined to `recipes`: ended sessions only, with the rating coming from the cook's `/end` rating, falling back to the reflection's.
+
+`GET /suggest` builds a compact digest of the vault (`src/digest.ts`) and sends it to `claude-sonnet-5-5` (`src/suggest.ts`, effort `low`, structured output against `suggestSchema`):
+
+- **Recipes:** each saved recipe with times cooked, last cooked (London day), average and latest rating (from finished sessions) and its first dozen ingredients. Loved recipes (latest rating 4 or 5, best average first) come first, then never cooked, then the rest, capped at 120.
+- **Rated badly:** a recipe whose latest rating is 1 or 2 is left out of the candidates and listed by title so the model knows. Rate it well on a later cook and it's back. Whatever the model returns is checked against the candidates, so a badly rated, deleted or invented recipe can never come back, and the reasons are tidied.
+- **Ingredients and techniques:** counted from `links`, taking each session note that links to an ingredient or technique note and the rating in that session note. Favourite ingredients have more loved cooks than poor ones, avoided ingredients at least as many poor (rated 1 or 2) as loved, and techniques to practise average under 4.
+- **USER.md:** preferences and the body, trimmed to 4,000 characters.
+
+With nothing to choose from the answer is an empty list and Claude isn't called. Each call logs a `sous_suggest` line with timing and token usage.
 
 ## Storage
 
