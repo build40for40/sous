@@ -78,9 +78,16 @@ The app polls `GET /shares/:id` (or the list) while a share is `reading`.
 
 Retries: Instagram or a site answering 429/5xx, and Claude 408/409/429/5xx, are retried on the alarm after 10 s, 1 min, 5 min and 30 min. After five attempts the share becomes `needs_screenshot`. A post that's private or deleted, or a refusal, isn't retried. Each extraction logs a `sous_extract` line with its timing, status and token usage; failures log `sous_extract_error`.
 
-## Not verified yet
+## Reading from Cloudflare (tested 6 Nov)
 
-- **Reading from Cloudflare.** Every real fetch so far ran from the build Mac. Instagram may answer Cloudflare's servers differently, or block them. Check the first `sous_extract` logs after deploy.
+A throwaway probe ran this Worker's own readers (`src/sources.ts`) on Cloudflare with `wrangler dev --remote`, from the London data centre (LHR). Nothing was deployed. All 10 reads succeeded:
+
+- **8 real posts:** every one returned the creator and the full caption, matching the build Mac's run to within line-break differences, in 350–780 ms each. The posts covered recipe-in-caption reels, a photo post, a "comment RECIPE" post and a showpiece.
+- **2 creator recipe pages** (Feel Good Foodie, Half Baked Harvest): both returned their schema.org recipe data.
+
+What that doesn't prove: behaviour at volume (Instagram may rate limit a busy Worker), and from other data centres. The retries and the screenshot fallback cover a block; watch the `sous_extract_error` logs after launch.
+
+## Not verified yet
 - **Instagram's terms.** Reading the embed page from a server is still automated access. The team accepted that risk for the MVP (see the plan doc).
 - **Creator credit.** The contract recipe has no field for the creator, so `creator` is on the share for now. Adding it to `packages/contracts` needs a PR agreed with the brain and app workstreams.
 

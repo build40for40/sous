@@ -31,7 +31,7 @@ That's **18 of 24 real recipes automatically (75%)**, and up to 22 of 24 with a 
 
 **For comparison:** ReciMe, the best-known app here, also imports from the caption through the share button. Reviewers say it "often struggles" when the recipe is only in the video.
 
-**Not verified yet:** whether Instagram answers Cloudflare's servers the way it answers the build Mac. Check the first `sous_extract` logs after deploy.
+**Reading from Cloudflare (tested 6 Nov):** a throwaway probe ran the Worker's readers on Cloudflare's London data centre (`wrangler dev --remote`, nothing deployed). All 8 real posts returned their full caption, and both creator recipe pages returned their recipe data. Not yet seen: behaviour at volume, or from other data centres.
 
 ## The three stages
 
