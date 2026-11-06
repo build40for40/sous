@@ -1,9 +1,13 @@
 import { env, exports } from "cloudflare:workers";
-import type { Recipe } from "@sous/contracts";
+import { runInDurableObject } from "cloudflare:test";
+import type { Recipe, StreamEvent, Turn } from "@sous/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { UserBrain } from "./brain";
 import { BASE_PATH } from "./http";
 import worker from "./index";
-import { mockWorkos, signToken, type WorkosMock } from "./testing";
+import { STAGE_PROMPT } from "./prompt";
+import { demoRecipe } from "./seed";
+import { mockClaude, mockWorkos, readEvents, signToken, type WorkosMock } from "./testing";
 
 let workos: WorkosMock;
 beforeEach(() => {
@@ -171,5 +175,262 @@ describe("/recipes", () => {
     expect((await call(`/recipes/${alices.id}`, { user: "user_bob" })).status).toBe(404);
     expect((await call(`/recipes/${alices.id}`, { user: "user_bob", method: "DELETE" })).status).toBe(404);
     expect((await call(`/recipes/${alices.id}`, { user: "user_alice" })).status).toBe(200);
+  });
+});
+
+describe("/sessions", () => {
+  async function demoRecipeId(user: string): Promise<string> {
+    const { recipes } = await (await call("/recipes", { user })).json<{ recipes: Recipe[] }>();
+    return recipes.find((r) => r.title === demoRecipe.title)!.id!;
+  }
+
+  async function startSession(user: string): Promise<string> {
+    const response = await call("/sessions", { user, method: "POST", body: { recipe_id: await demoRecipeId(user) } });
+    expect(response.status).toBe(201);
+    return (await response.json<{ id: string }>()).id;
+  }
+
+  async function turn(user: string, id: string, body: unknown): Promise<StreamEvent[]> {
+    const response = await call(`/sessions/${id}/turns`, { user, method: "POST", body });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/event-stream");
+    return readEvents<StreamEvent>(response);
+  }
+
+  const spoken = (events: StreamEvent[]) => events.flatMap((e) => (e.type === "text" ? [e.delta] : [])).join("");
+  const toolCalls = (events: StreamEvent[]) => events.flatMap((e) => (e.type === "tool_call" ? [e.tool_call] : []));
+
+  async function sessionRow(user: string, id: string) {
+    return runInDurableObject(env.USER_BRAIN.get(env.USER_BRAIN.idFromName(user)), (_brain: UserBrain, state) => {
+      const row = state.storage.sql.exec("SELECT * FROM sessions WHERE id = ?", id).one();
+      return { stage: row.stage, turns: JSON.parse(row.turns as string) as Turn[], facts: JSON.parse(row.facts as string) as string[], messages: JSON.parse(row.messages as string) };
+    });
+  }
+
+  it("starts a session with Sou's opening line, without calling Claude", async () => {
+    const claude = mockClaude();
+    const user = "user_sessionStart";
+    const recipeId = await demoRecipeId(user);
+    const response = await call("/sessions", { user, method: "POST", body: { recipe_id: recipeId } });
+    expect(response.status).toBe(201);
+    const session = await response.json<{ id: string; recipe_id: string; stage: string; opening_line: string }>();
+    expect(session).toMatchObject({ recipe_id: recipeId, stage: "decide" });
+    expect(session.opening_line).toContain(demoRecipe.title);
+    expect(session.opening_line).not.toMatch(/[0-9]/);
+    expect(claude.requests).toEqual([]);
+    expect((await sessionRow(user, session.id)).turns).toEqual([{ role: "sous", at: expect.any(String), text: session.opening_line }]);
+  });
+
+  it("rejects bad session requests", async () => {
+    const user = "user_sessionBad";
+    expect((await call("/sessions", { user, method: "POST", body: { recipe_id: "nope" } })).status).toBe(404);
+    expect((await call("/sessions", { user, method: "POST", body: {} })).status).toBe(400);
+    expect((await call("/sessions", { user })).status).toBe(405);
+    expect((await call("/sessions/nope/turns", { user, method: "POST", body: { text: "hi" } })).status).toBe(404);
+    const id = await startSession(user);
+    expect((await call(`/sessions/${id}/turns`, { user, method: "POST", body: {} })).status).toBe(400);
+    expect((await call(`/sessions/${id}/turns`, { user, method: "POST", body: { text: "" } })).status).toBe(400);
+    expect((await call(`/sessions/${id}/turns`, { user })).status).toBe(405);
+  });
+
+  it("keeps each user's sessions in their own brain", async () => {
+    const id = await startSession("user_sessionOwner");
+    expect((await call(`/sessions/${id}/turns`, { user: "user_sessionOther", method: "POST", body: { text: "hi" } })).status).toBe(404);
+  });
+
+  it("refuses to start without the Anthropic API key", async () => {
+    const request = new Request<unknown, IncomingRequestCfProperties>(`https://build40for40.com${BASE_PATH}/sessions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await signToken({ sub: "user_sessionNokey" })}` },
+      body: JSON.stringify({ recipe_id: "x" }),
+    });
+    expect((await worker.fetch(request, { ...env, ANTHROPIC_API_KEY: "" })).status).toBe(503);
+  });
+
+  it("walks the demo recipe through typed turns, with step and timer tool calls coming back", async () => {
+    const user = "user_demoCook";
+    const id = await startSession(user);
+    const claude = mockClaude(
+      {
+        content: [
+          { type: "text", text: "Lovely. Butter one side of each slice, right to the edges." },
+          { type: "tool_use", id: "toolu_stage", name: "set_stage", input: { stage: "cook" } },
+          { type: "tool_use", id: "toolu_step0", name: "go_to_step", input: { index: 0 } },
+        ],
+      },
+      { content: [{ type: "text", text: "Shout when you're buttered." }] },
+      {
+        content: [
+          { type: "text", text: "Cheese in the middle, into a dry pan on a medium heat. Three minutes on this side." },
+          { type: "tool_use", id: "toolu_step1", name: "go_to_step", input: { index: 1 } },
+          { type: "tool_use", id: "toolu_timer", name: "start_timer", input: { label: "first side", seconds: 180 } },
+        ],
+      },
+      { content: [{ type: "tool_use", id: "toolu_cancel", name: "cancel_timer", input: { timer_id: "timer-1" } }] },
+      { content: [{ type: "text", text: "Timer's off. Flip it over." }] },
+    );
+
+    const first = await turn(user, id, { text: "Everything's out, let's go." });
+    expect(spoken(first)).toBe("Lovely. Butter one side of each slice, right to the edges.");
+    expect(toolCalls(first)).toEqual([
+      { id: "toolu_stage", name: "set_stage", input: { stage: "cook" } },
+      { id: "toolu_step0", name: "go_to_step", input: { index: 0 } },
+    ]);
+    expect(first.at(-1)).toEqual({ type: "done", stop_reason: "tool_use" });
+
+    const second = await turn(user, id, {
+      tool_results: [
+        { tool_call_id: "toolu_stage", content: "ok" },
+        { tool_call_id: "toolu_step0", content: "ok" },
+      ],
+    });
+    expect(spoken(second)).toBe("Shout when you're buttered.");
+    expect(second.at(-1)).toEqual({ type: "done", stop_reason: "end_turn" });
+    expect(claude.requests[1].messages.at(-1)).toEqual({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "toolu_stage", content: "ok" },
+        { type: "tool_result", tool_use_id: "toolu_step0", content: "ok" },
+      ],
+    });
+
+    const third = await turn(user, id, { text: "Buttered. What next?" });
+    expect(toolCalls(third)).toEqual([
+      { id: "toolu_step1", name: "go_to_step", input: { index: 1 } },
+      { id: "toolu_timer", name: "start_timer", input: { label: "first side", seconds: 180 } },
+    ]);
+    expect(third.at(-1)).toEqual({ type: "done", stop_reason: "tool_use" });
+
+    const fourth = await turn(user, id, {
+      tool_results: [
+        { tool_call_id: "toolu_step1", content: "ok" },
+        { tool_call_id: "toolu_timer", content: "timer-1" },
+      ],
+      text: "Actually it's already golden, cancel that timer.",
+    });
+    expect(toolCalls(fourth)).toEqual([{ id: "toolu_cancel", name: "cancel_timer", input: { timer_id: "timer-1" } }]);
+    expect(claude.requests[3].messages.at(-1).content.at(-1)).toEqual({ type: "text", text: "Actually it's already golden, cancel that timer." });
+
+    const fifth = await turn(user, id, { tool_results: [{ tool_call_id: "toolu_cancel", content: "ok" }] });
+    expect(spoken(fifth)).toBe("Timer's off. Flip it over.");
+    expect(fifth.at(-1)).toEqual({ type: "done", stop_reason: "end_turn" });
+
+    const row = await sessionRow(user, id);
+    expect(row.stage).toBe("cook");
+    expect(row.turns.map((t) => t.role)).toEqual(["sous", "cook", "sous", "tool", "sous", "cook", "sous", "tool", "cook", "sous", "tool", "sous"]);
+    expect(row.messages.map((m: { role: string }) => m.role)).toEqual(["user", "assistant", "user", "assistant", "user", "assistant", "user", "assistant", "user", "assistant"]);
+  });
+
+  it("sends Claude the cached context and the live model settings", async () => {
+    const user = "user_sessionRequest";
+    await call("/me", { user, method: "PATCH", body: { preferences: { avoid: ["coriander"] } } });
+    const id = await startSession(user);
+    const claude = mockClaude({ content: [{ type: "text", text: "Hello!" }] });
+    await turn(user, id, { text: "Hi Sou" });
+
+    const [request] = claude.requests;
+    expect(request).toMatchObject({ model: "claude-sonnet-5-5", stream: true, thinking: { type: "between_tools" }, output_config: { effort: "low" }, cache_control: { type: "ephemeral" } });
+    expect(request.tools.map((t: { name: string }) => t.name)).toEqual(["start_timer", "cancel_timer", "go_to_step", "set_stage", "show", "note"]);
+    expect(request.system[0]).toEqual({ type: "text", text: STAGE_PROMPT });
+    expect(request.system[1].cache_control).toEqual({ type: "ephemeral" });
+    expect(request.system[1].text).toContain("coriander");
+    expect(request.system[1].text).toContain(demoRecipe.title);
+    expect(request.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Hi Sou" }] }]);
+  });
+
+  it("runs note in the brain, saves the fact and carries on without the phone", async () => {
+    const user = "user_sessionNote";
+    const id = await startSession(user);
+    const claude = mockClaude(
+      { content: [{ type: "tool_use", id: "toolu_note", name: "note", input: { fact: "Hates coriander" } }] },
+      { content: [{ type: "text", text: "Noted, no coriander ever." }] },
+    );
+    const events = await turn(user, id, { text: "I can't stand coriander." });
+    expect(toolCalls(events)).toEqual([]);
+    expect(spoken(events)).toBe("Noted, no coriander ever.");
+    expect(events.at(-1)).toEqual({ type: "done", stop_reason: "end_turn" });
+    expect(claude.requests[1].messages.at(-1)).toEqual({ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_note", content: "saved" }] });
+
+    const row = await sessionRow(user, id);
+    expect(row.facts).toEqual(["Hates coriander"]);
+    expect(row.turns.slice(-3)).toEqual([
+      { role: "sous", at: expect.any(String), tool_calls: [{ id: "toolu_note", name: "note", input: { fact: "Hates coriander" } }] },
+      { role: "tool", at: expect.any(String), tool_results: [{ tool_call_id: "toolu_note", content: "saved" }] },
+      { role: "sous", at: expect.any(String), text: "Noted, no coriander ever." },
+    ]);
+  });
+
+  it("answers note alongside client tools once the phone sends its results", async () => {
+    const user = "user_sessionMixed";
+    const id = await startSession(user);
+    const claude = mockClaude(
+      {
+        content: [
+          { type: "tool_use", id: "toolu_note2", name: "note", input: { fact: "Owns one frying pan" } },
+          { type: "tool_use", id: "toolu_show", name: "show", input: { view: "ingredients" } },
+        ],
+      },
+      { content: [{ type: "text", text: "There's your list." }] },
+    );
+    const events = await turn(user, id, { text: "I've only got one pan, show me the list." });
+    expect(toolCalls(events)).toEqual([{ id: "toolu_show", name: "show", input: { view: "ingredients" } }]);
+    expect(events.at(-1)).toEqual({ type: "done", stop_reason: "tool_use" });
+    expect(claude.requests).toHaveLength(1);
+
+    const owed = await call(`/sessions/${id}/turns`, { user, method: "POST", body: { text: "hello?" } });
+    expect(owed.status).toBe(409);
+    expect(await owed.json()).toEqual({ error: "tool_results_required", tool_call_ids: ["toolu_show"] });
+
+    await turn(user, id, { tool_results: [{ tool_call_id: "toolu_show", content: "ok" }] });
+    expect(claude.requests[1].messages.at(-1)).toEqual({
+      role: "user",
+      content: [
+        { type: "tool_result", tool_use_id: "toolu_note2", content: "saved" },
+        { type: "tool_result", tool_use_id: "toolu_show", content: "ok" },
+      ],
+    });
+    expect((await sessionRow(user, id)).facts).toEqual(["Owns one frying pan"]);
+  });
+
+  it("rejects tool results nobody asked for", async () => {
+    const user = "user_sessionUnasked";
+    const id = await startSession(user);
+    const response = await call(`/sessions/${id}/turns`, { user, method: "POST", body: { tool_results: [{ tool_call_id: "toolu_x", content: "ok" }] } });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "unexpected_tool_results" });
+  });
+
+  it("streams an error and saves nothing when Claude fails, so the turn can be retried", async () => {
+    const user = "user_sessionError";
+    const id = await startSession(user);
+    const claude = mockClaude(
+      { status: 400, message: "bad request" },
+      { breakAfter: [{ type: "text", text: "Right, so" }] },
+      { content: [{ type: "text", text: "Sorry about that." }], stop_reason: "refusal" },
+      { content: [{ type: "text", text: "Back with you." }] },
+    );
+    const before = await sessionRow(user, id);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const events = await turn(user, id, { text: "Hello?" });
+      expect(events.at(-1)).toEqual({ type: "error", message: expect.any(String) });
+      expect(events.some((e) => e.type === "done")).toBe(false);
+      expect(await sessionRow(user, id)).toEqual(before);
+    }
+
+    const events = await turn(user, id, { text: "Hello?" });
+    expect(spoken(events)).toBe("Back with you.");
+    expect(claude.requests.at(-1)!.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Hello?" }] }]);
+  });
+
+  it("refuses turns once the session has ended", async () => {
+    const user = "user_sessionEnded";
+    const id = await startSession(user);
+    await runInDurableObject(env.USER_BRAIN.get(env.USER_BRAIN.idFromName(user)), (_brain: UserBrain, state) => {
+      state.storage.sql.exec("UPDATE sessions SET ended_at = ? WHERE id = ?", new Date().toISOString(), id);
+    });
+    const response = await call(`/sessions/${id}/turns`, { user, method: "POST", body: { text: "One more thing" } });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "session_ended" });
   });
 });

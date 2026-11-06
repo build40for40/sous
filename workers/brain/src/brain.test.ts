@@ -60,4 +60,54 @@ describe("UserBrain", () => {
       expect(brain.listRecipes().map((r) => r.title)).toEqual([demoRecipe.title]);
     });
   });
+
+  it("adds the live session columns", async () => {
+    await runInDurableObject(brainFor("user_columns"), (brain: UserBrain, state) => {
+      brain.listRecipes();
+      const columns = state.storage.sql.exec<{ name: string }>("PRAGMA table_info(sessions)").toArray().map((c) => c.name);
+      expect(columns).toEqual(expect.arrayContaining(["model", "context", "turns", "facts"]));
+    });
+  });
+
+  it("starts a session with its context assembled once from the vault", async () => {
+    await runInDurableObject(brainFor("user_vault"), (brain: UserBrain, state) => {
+      const recipe = brain.listRecipes()[0];
+      const note = `recipes/${recipe.slug}.md`;
+      const now = "2026-11-06T12:00:00Z";
+      const file = (path: string, kind: string, body: string, updated = now) =>
+        state.storage.sql.exec("INSERT INTO files (path, kind, body, updated_at) VALUES (?, ?, ?, ?)", path, kind, body, updated);
+      const link = (src: string, dst: string) => state.storage.sql.exec("INSERT INTO links (src, dst, kind) VALUES (?, ?, 'mentions')", src, dst);
+      file("MEMORY.md", "memory", "Always preheat the pan.");
+      file(note, "recipe", "Best with mature cheddar.");
+      for (const [n, day] of [[1, "01"], [2, "02"], [3, "03"], [4, "04"]] as const) {
+        file(`sessions/s${n}.md`, "session", `Cook number ${n}.`, `2026-11-${day}T18:00:00Z`);
+        link(`sessions/s${n}.md`, note);
+      }
+      file("sessions/other.md", "session", "A different recipe.");
+      file("ingredients/cheddar.md", "ingredient", "Grate it fine.");
+      file("cuisines/british.md", "cuisine", "Toasties count.");
+      file("ingredients/unlinked.md", "ingredient", "Never mentioned.");
+      link(note, "ingredients/cheddar.md");
+      link(note, "cuisines/british.md");
+
+      const session = brain.createSession(recipe.id!)!;
+      expect(session.opening_line).toContain(recipe.title);
+      const row = state.storage.sql.exec("SELECT * FROM sessions WHERE id = ?", session.id).one();
+      expect(row).toMatchObject({ recipe_id: recipe.id, stage: "decide", model: "claude-sonnet-5-5", messages: "[]", facts: "[]" });
+      const context = row.context as string;
+      for (const text of ["Always preheat the pan.", "Best with mature cheddar.", "Cook number 4.", "Cook number 3.", "Cook number 2.", "Grate it fine.", "Toasties count.", session.opening_line]) {
+        expect(context).toContain(text);
+      }
+      for (const text of ["Cook number 1.", "A different recipe.", "Never mentioned."]) {
+        expect(context).not.toContain(text);
+      }
+      expect(context.indexOf("Cook number 4.")).toBeLessThan(context.indexOf("Cook number 2."));
+    });
+  });
+
+  it("won't start a session for a recipe it doesn't have", async () => {
+    await runInDurableObject(brainFor("user_norecipe"), (brain: UserBrain) => {
+      expect(brain.createSession("nope")).toBeNull();
+    });
+  });
 });
