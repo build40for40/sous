@@ -48,17 +48,21 @@ class Cook {
 /// One answer to "what should I cook?".
 class Suggestion {
   const Suggestion({
+    required this.number,
     required this.recipeId,
     required this.title,
     required this.reason,
   });
 
   factory Suggestion.fromJson(Json json) => Suggestion(
+    number: json['number'] as int,
     recipeId: json['recipe_id'] as String,
     title: json['title'] as String,
     reason: json['reason'] as String,
   );
 
+  /// Its place in the list, from 1, so the chef can say "number three".
+  final int number;
   final String recipeId;
   final String title;
 

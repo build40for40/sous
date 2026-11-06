@@ -137,11 +137,17 @@ void main() {
       final suggestions = await client(
         (_) => json({
           'suggestions': [
-            {'recipe_id': 'r1', 'title': 'Beans', 'reason': 'Quick.'},
+            {
+              'number': 1,
+              'recipe_id': 'r1',
+              'title': 'Beans',
+              'reason': 'Quick.',
+            },
           ],
         }),
       ).suggest();
       expect(calls.single.path, '/sous/api/v1/suggest');
+      expect(suggestions.single.number, 1);
       expect(suggestions.single.reason, 'Quick.');
     });
 

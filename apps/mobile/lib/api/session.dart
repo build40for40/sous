@@ -152,22 +152,61 @@ class ToolResult {
   };
 }
 
+/// Something that happened on the phone and needs the chef. It goes to Sous
+/// with the chef's next turn.
+sealed class KitchenEvent {
+  const KitchenEvent();
+
+  Json toJson();
+}
+
+/// A timer the phone was running has finished.
+class TimerFinished extends KitchenEvent {
+  const TimerFinished({required this.timerId, required this.label});
+
+  /// The id the phone returned from `start_timer`.
+  final String timerId;
+
+  /// The label Sous gave it, like "rice".
+  final String label;
+
+  @override
+  Json toJson() => {
+    'type': 'timer_finished',
+    'timer_id': timerId,
+    'label': label,
+  };
+}
+
 /// The body of `POST /sessions/:id/turns`: what the cook said, the results
-/// owed for the last reply's tool calls, or both.
+/// owed for the last reply's tool calls, what happened on the phone, or any
+/// mix of them.
 class TurnRequest {
-  TurnRequest({this.text, this.toolResults = const []})
+  TurnRequest({this.text, this.toolResults = const [], this.events = const []})
     : assert(
-        (text != null && text.isNotEmpty) || toolResults.isNotEmpty,
-        'A turn needs text, tool results or both',
+        (text != null && text.isNotEmpty) ||
+            toolResults.isNotEmpty ||
+            events.isNotEmpty,
+        'A turn needs text, tool results or events',
       );
 
   final String? text;
   final List<ToolResult> toolResults;
 
+  /// At most [maxEvents].
+  final List<KitchenEvent> events;
+
+  static const maxEvents = 10;
+
+  /// Whether the chef opened this turn, rather than it only carrying tool
+  /// results back for Sous to carry on.
+  bool get fromChef => text != null || events.isNotEmpty;
+
   Json toJson() => {
     if (text != null && text!.isNotEmpty) 'text': text,
     if (toolResults.isNotEmpty)
       'tool_results': [for (final r in toolResults) r.toJson()],
+    if (events.isNotEmpty) 'events': [for (final e in events) e.toJson()],
   };
 }
 
@@ -185,6 +224,9 @@ sealed class StreamEvent {
       json['stop_reason'] == 'tool_use'
           ? StopReason.toolUse
           : StopReason.endTurn,
+      awaitingAck: json['awaiting_ack'] == null
+          ? null
+          : AwaitingAck.fromJson(json['awaiting_ack'] as Json),
     ),
     'error' => ErrorEvent(json['message'] as String),
     _ => null,
@@ -207,9 +249,25 @@ class ToolCallEvent extends StreamEvent {
 
 /// The reply is finished. [StopReason.toolUse] means results are owed.
 class DoneEvent extends StreamEvent {
-  const DoneEvent(this.stopReason);
+  const DoneEvent(this.stopReason, {this.awaitingAck});
 
   final StopReason stopReason;
+
+  /// Set when the reply ended with an instruction waiting for "Heard". Only
+  /// ever with [StopReason.endTurn].
+  final AwaitingAck? awaitingAck;
+}
+
+/// An instruction from Sous that the chef hasn't acknowledged yet.
+class AwaitingAck {
+  const AwaitingAck(this.short);
+
+  factory AwaitingAck.fromJson(Json json) =>
+      AwaitingAck(json['short'] as String);
+
+  /// What to repeat until the chef answers, like "Chef, rice, twelve
+  /// minutes. Heard?".
+  final String short;
 }
 
 /// The turn failed and nothing was saved, so it can be sent again.

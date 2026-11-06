@@ -21,6 +21,7 @@ dependencies:
   receive_sharing_intent: ^1.9.0
   record: ^7.1.2
   sherpa_onnx: ^2.0.1
+  wakelock_plus: ^1.8.2
 
 dev_dependencies:
   flutter_test:

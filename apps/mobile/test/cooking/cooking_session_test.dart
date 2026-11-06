@@ -349,4 +349,57 @@ void main() {
       expect(session.state.error!.error, BrainError.turnInProgress);
     });
   });
+
+  group('kitchen protocol', () {
+    test('keeps what is awaiting "Heard" until the chef speaks', () async {
+      await session.start('recipe-example-1');
+      brain.replies
+        ..add([
+          text('Chef, twelve minutes. Set it?'),
+          {
+            'type': 'done',
+            'stop_reason': 'end_turn',
+            'awaiting_ack': {'short': 'Chef, rice timer. Heard?'},
+          },
+        ])
+        ..add([done('end_turn')]);
+      await session.say('Rice is in.');
+      expect(session.state.awaitingAck?.short, 'Chef, rice timer. Heard?');
+
+      await session.say('Heard.');
+      expect(session.state.awaitingAck, isNull);
+      expect(session.state.reply, isEmpty);
+      expect(spoken.skip(1).join(), 'Chef, twelve minutes. Set it?');
+    });
+
+    test('queues kitchen events and sends them with the next turn, even '
+        'without words', () async {
+      await session.start('recipe-example-1');
+      session
+        ..notify(const TimerFinished(timerId: 'timer-1', label: 'rice'))
+        ..notify(const TimerFinished(timerId: 'timer-2', label: 'dahl'));
+      expect(session.state.needsChef, isTrue);
+
+      brain.replies.add([text('Chef, the rice is done.'), done('end_turn')]);
+      await session.send();
+      expect(brain.turns.single, {
+        'events': [
+          {'type': 'timer_finished', 'timer_id': 'timer-1', 'label': 'rice'},
+          {'type': 'timer_finished', 'timer_id': 'timer-2', 'label': 'dahl'},
+        ],
+      });
+      expect(session.state.needsChef, isFalse);
+      expect(() => session.send(), throwsArgumentError);
+    });
+
+    test('keeps the events when the turn does not get through', () async {
+      await session.start('recipe-example-1');
+      session.notify(const TimerFinished(timerId: 'timer-1', label: 'rice'));
+      brain.replies.add([
+        {'type': 'error', 'message': 'Fake outage.'},
+      ]);
+      await session.send(text: 'What now?');
+      expect(session.state.needsChef, isTrue);
+    });
+  });
 }

@@ -1,13 +1,27 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
+import '../api/session.dart';
 import '../cooking/cooking_session.dart';
+import '../cooking/kitchen_timers.dart';
 import 'audio_io.dart';
+import 'chime.dart';
 import 'sentences.dart';
 import 'speakable.dart';
 import 'speech_to_text.dart';
 import 'text_to_speech.dart';
+import 'wake_word.dart';
+
+/// How long Sous waits before repeating an instruction the chef hasn't
+/// answered: about ten seconds, then thirty, then every minute. The last gap
+/// repeats until the chef opens a turn.
+const ackRepeatGaps = [
+  Duration(seconds: 10),
+  Duration(seconds: 30),
+  Duration(minutes: 1),
+];
 
 /// How Sous handles the cook talking while Sous is talking.
 enum DuplexMode {
@@ -42,15 +56,38 @@ enum VoiceStatus {
   failed,
 }
 
+/// What the flame shows, in the kitchen protocol's words.
+enum FlameState {
+  waiting,
+  chefSpeaking,
+  thinking,
+  sousTalking,
+
+  /// Red: something on the phone, like a finished timer, is waiting for the
+  /// chef to say "Hey Sous" or tap.
+  needsChef,
+}
+
 class VoiceState {
   const VoiceState({
     this.status = VoiceStatus.off,
     this.partial = '',
     this.heard,
     this.error,
+    this.needsChef = false,
   });
 
   final VoiceStatus status;
+
+  /// Sous has kitchen events queued for the chef's next turn.
+  final bool needsChef;
+
+  FlameState get flame => switch (status) {
+    VoiceStatus.hearing => FlameState.chefSpeaking,
+    VoiceStatus.thinking => FlameState.thinking,
+    VoiceStatus.speaking => FlameState.sousTalking,
+    _ => needsChef ? FlameState.needsChef : FlameState.waiting,
+  };
 
   /// What the cook is saying right now, from engines that report it.
   final String partial;
@@ -75,6 +112,9 @@ class VoiceLoopSettings {
     this.echoCancel = true,
     this.stopWordsWhileSpeaking = true,
     this.echoTail = const Duration(milliseconds: 400),
+    this.listenFor = const Duration(seconds: 8),
+    this.repeatGaps = ackRepeatGaps,
+    this.chimeEvery = const Duration(seconds: 8),
   });
 
   final DuplexMode duplex;
@@ -88,27 +128,45 @@ class VoiceLoopSettings {
 
   /// How long after Sous stops that the mic may still be hearing Sous.
   final Duration echoTail;
+
+  /// How long after "Hey Sous" or a tap the chef's words still go to Sous,
+  /// so they can pause or add to what they said.
+  final Duration listenFor;
+
+  /// See [ackRepeatGaps].
+  final List<Duration> repeatGaps;
+
+  /// How often the chime plays while Sous needs the chef.
+  final Duration chimeEvery;
 }
 
-/// The spoken conversation: hears the cook, sends what they said to the
-/// [CookingSession], speaks Sous's reply sentence by sentence while it
-/// streams, and stops when the chef cuts in. Works with any [AudioIO],
-/// [SpeechToText] and [TextToSpeech].
+/// The spoken conversation, following the kitchen protocol: a turn opens
+/// only on "Hey Sous" or a tap, what the chef says goes to the
+/// [CookingSession], Sous's reply is spoken sentence by sentence while it
+/// streams, unanswered instructions repeat like an alarm clock, and when the
+/// phone needs the chef the flame goes red and a chime plays instead of
+/// speech. Works with any [AudioIO], [SpeechToText], [TextToSpeech] and
+/// [WakeWord].
 class VoiceLoop {
   VoiceLoop({
     required this._audio,
     required this._speechToText,
     required this._textToSpeech,
     required this._session,
+    this._wakeWord,
     this.settings = const VoiceLoopSettings(),
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+    StartTimer? startTimer,
+  }) : _clock = clock ?? DateTime.now,
+       _startTimer = startTimer ?? Timer.new;
 
   final AudioIO _audio;
   final SpeechToText _speechToText;
   final TextToSpeech _textToSpeech;
   final CookingSession _session;
+  final WakeWord? _wakeWord;
   final DateTime Function() _clock;
+  final StartTimer _startTimer;
   final VoiceLoopSettings settings;
 
   final _states = StreamController<VoiceState>.broadcast();
@@ -117,6 +175,7 @@ class VoiceLoop {
   StreamSubscription<Float32List>? _mic;
   StreamSubscription<SpeechEvent>? _speech;
   StreamSubscription<CookingState>? _replies;
+  StreamSubscription<void>? _wake;
   var _running = false;
 
   final _splitter = SentenceSplitter();
@@ -133,6 +192,18 @@ class VoiceLoop {
   var _hearing = false;
   var _overlapsSous = false;
   String? _pending;
+
+  DateTime? _openUntil;
+  var _speechInTurn = false;
+  var _wantsEvents = false;
+
+  AwaitingAck? _ack;
+  AwaitingAck? _ackAnswered;
+  var _repeats = 0;
+  Timer? _repeat;
+
+  Timer? _chimer;
+  late final _chime = chime();
 
   VoiceState get state => _state;
 
@@ -156,6 +227,15 @@ class VoiceLoop {
         sampleRate: _speechToText.sampleRate,
         echoCancel: settings.echoCancel,
       );
+      final wakeWord = _wakeWord;
+      if (wakeWord != null && wakeWord.sampleRate == _speechToText.sampleRate) {
+        try {
+          await wakeWord.init();
+          _wake = wakeWord.heard.listen((_) => _onWake());
+        } on Object catch (e) {
+          _report(e);
+        }
+      }
       _running = true;
       final current = _session.state;
       _consumed = current.transcript.length <= 1 ? 0 : current.reply.length;
@@ -176,9 +256,19 @@ class VoiceLoop {
   Future<void> stop() async {
     if (!_running) return;
     _running = false;
+    _repeat?.cancel();
+    _chimer?.cancel();
+    _repeat = _chimer = null;
     await _stopSpeaking();
     await _teardown();
     _emit(const VoiceState());
+  }
+
+  /// A tap on the flame: the same as the chef saying "Hey Sous". Silences
+  /// Sous if it's talking, stops any repeats, sends whatever the phone has
+  /// queued for the chef, and listens for the chef's words.
+  Future<void> openTurn() async {
+    if (_running) _open(wordsComing: false);
   }
 
   /// Stops Sous mid-sentence: a tap on the flame, or the chef saying "Hold",
@@ -210,14 +300,19 @@ class VoiceLoop {
     await _mic?.cancel();
     await _speech?.cancel();
     await _replies?.cancel();
-    _mic = _speech = _replies = null;
+    await _wake?.cancel();
+    _mic = _speech = _replies = _wake = null;
     _hearing = false;
     _pending = null;
+    _wantsEvents = false;
+    _openUntil = null;
     await _audio.stopCapture();
     _speechToText.reset();
+    _wakeWord?.reset();
   }
 
   void _onAudio(Float32List samples) {
+    if (_wake != null) _wakeWord!.accept(samples);
     if (settings.duplex == DuplexMode.half &&
         !settings.stopWordsWhileSpeaking &&
         _sousAudible) {
@@ -241,11 +336,34 @@ class VoiceLoop {
     _ => false,
   };
 
+  bool get _turnOpen {
+    final until = _openUntil;
+    return until != null && _clock().isBefore(until);
+  }
+
+  void _keepListening() => _openUntil = _clock().add(settings.listenFor);
+
+  void _onWake() {
+    if (_running) _open(wordsComing: _hearing);
+  }
+
+  /// "Hey Sous" or a tap. When [wordsComing], the chef is still mid-sentence
+  /// and the queued events go with their words instead of on their own.
+  void _open({required bool wordsComing}) {
+    _stopRepeating(answered: true);
+    _keepListening();
+    if (_sousSpeaking) unawaited(silence());
+    if (!wordsComing) _wantsEvents = true;
+    _sendPending();
+    _update();
+  }
+
   void _onSpeech(SpeechEvent event) {
     if (!_running) return;
     switch (event) {
       case SpeechStarted():
         _hearing = true;
+        _speechInTurn = _turnOpen;
         _overlapsSous = _sousAudible;
         if (settings.duplex == DuplexMode.full && _sousSpeaking) {
           unawaited(silence());
@@ -254,34 +372,114 @@ class VoiceLoop {
         _emit(_copy(partial: text));
       case FinalTranscript(:final text):
         final overlaps = _overlapsSous;
+        final inTurn = _speechInTurn || _turnOpen;
         _hearing = false;
         _overlapsSous = false;
+        _speechInTurn = false;
         _emit(_copy(partial: ''));
-        _onUtterance(text.trim(), overlaps);
+        _onUtterance(text.trim(), overlapsSous: overlaps, inTurn: inTurn);
     }
     _update();
   }
 
-  /// Stop words silence Sous. Anything else goes to Sous once it has
-  /// finished the reply it's on, so nothing it was doing gets skipped.
-  void _onUtterance(String text, bool overlapsSous) {
+  /// "Hey Sous" opens a turn and silences Sous. Stop words silence Sous.
+  /// Anything else counts only inside an open turn, or as an answer to an
+  /// instruction Sous is waiting on, and goes to Sous once it has finished
+  /// the reply it's on, so nothing it was doing gets skipped.
+  void _onUtterance(
+    String text, {
+    required bool overlapsSous,
+    required bool inTurn,
+  }) {
     if (text.isEmpty) return;
+    final afterWake = afterWakePhrase(text);
+    if (afterWake != null) {
+      final words = isStopCommand(afterWake) ? '' : afterWake;
+      _open(wordsComing: words.isNotEmpty);
+      if (words.isNotEmpty) _take(words);
+      return;
+    }
     if ((_sousSpeaking || _sessionBusy) && isStopCommand(text)) {
       unawaited(silence());
       return;
     }
     if (overlapsSous && settings.duplex == DuplexMode.half) return;
+    final answersSous =
+        _session.state.awaitingAck != null && isAcknowledgement(text);
+    if (!inTurn && !answersSous) return;
+    _stopRepeating(answered: true);
     if (_sousSpeaking) unawaited(silence());
+    _take(text);
+  }
+
+  void _take(String text) {
     _pending = _pending == null ? text : '$_pending $text';
     _sendPending();
   }
 
   void _sendPending() {
+    if (!_session.state.canSpeak) return;
     final text = _pending;
-    if (text == null || !_session.state.canSpeak) return;
+    final events = _wantsEvents && _session.state.needsChef;
+    _wantsEvents = false;
+    if (text == null && !events) return;
     _pending = null;
-    _emit(_copy(heard: text));
-    unawaited(_session.say(text).catchError((Object e) => _report(e)));
+    if (text != null) _emit(_copy(heard: text));
+    unawaited(_session.send(text: text).catchError((Object e) => _report(e)));
+  }
+
+  /// Repeats the instruction Sous is waiting on, after the next gap in
+  /// [VoiceLoopSettings.repeatGaps], until the chef opens a turn.
+  void _scheduleRepeat() {
+    final ack = _session.state.awaitingAck;
+    if (!_running ||
+        ack == null ||
+        identical(ack, _ackAnswered) ||
+        _repeat != null ||
+        _sousSpeaking ||
+        !_session.state.canSpeak) {
+      return;
+    }
+    if (!identical(ack, _ack)) {
+      _ack = ack;
+      _repeats = 0;
+    }
+    final gaps = settings.repeatGaps;
+    _repeat = _startTimer(gaps[math.min(_repeats, gaps.length - 1)], () {
+      _repeat = null;
+      if (!_running || !identical(_session.state.awaitingAck, ack)) return;
+      if (identical(ack, _ackAnswered)) return;
+      if (_hearing || _sousSpeaking || !_session.state.canSpeak) {
+        _scheduleRepeat();
+        return;
+      }
+      _repeats++;
+      _speak(ack.short);
+    });
+  }
+
+  void _stopRepeating({bool answered = false}) {
+    _repeat?.cancel();
+    _repeat = null;
+    if (answered) _ackAnswered = _session.state.awaitingAck;
+  }
+
+  /// Plays the chime now and every [VoiceLoopSettings.chimeEvery] while the
+  /// phone needs the chef. Sous never speaks first, so this is all it does.
+  void _syncChime(bool needed) {
+    if (!needed || !_running) {
+      _chimer?.cancel();
+      _chimer = null;
+    } else if (_chimer == null) {
+      _ring();
+    }
+  }
+
+  void _ring() {
+    _chimer = _startTimer(settings.chimeEvery, _ring);
+    if (_sousSpeaking || _hearing || _sessionBusy) return;
+    _playedUntil = _clock().add(_chime.duration);
+    unawaited(_audio.play(_chime).catchError((Object e) => _report(e)));
   }
 
   void _onSession(CookingState s) {
@@ -303,7 +501,12 @@ class VoiceLoop {
       final rest = _splitter.flush();
       if (rest != null) _speak(rest);
     }
+    if (s.awaitingAck == null || !identical(s.awaitingAck, _ack)) {
+      _stopRepeating();
+    }
     if (s.canSpeak) _sendPending();
+    if (s.canSpeak && !_sousSpeaking) _scheduleRepeat();
+    _syncChime(s.needsChef);
     _update();
   }
 
@@ -347,6 +550,7 @@ class VoiceLoop {
       _playedUntil = _clock();
     }
     _pumping = false;
+    if (_running && _queue.isEmpty) _scheduleRepeat();
     _update();
   }
 
@@ -362,14 +566,21 @@ class VoiceLoop {
 
   void _update() {
     if (!_running) return;
-    final status = _hearing && !(_overlapsSous && _sousSpeaking)
+    final chefTalking =
+        _hearing &&
+        !(_overlapsSous && _sousSpeaking) &&
+        (_speechInTurn || _turnOpen);
+    final status = chefTalking
         ? VoiceStatus.hearing
         : _sousSpeaking
         ? VoiceStatus.speaking
         : _sessionBusy || _pending != null
         ? VoiceStatus.thinking
         : VoiceStatus.listening;
-    if (status != _state.status) _emit(_copy(status: status));
+    final needsChef = _session.state.needsChef;
+    if (status != _state.status || needsChef != _state.needsChef) {
+      _emit(_copy(status: status, needsChef: needsChef));
+    }
   }
 
   void _report(Object error) => _emit(_copy(error: error));
@@ -379,11 +590,13 @@ class VoiceLoop {
     String? partial,
     String? heard,
     Object? error,
+    bool? needsChef,
   }) => VoiceState(
     status: status ?? _state.status,
     partial: partial ?? _state.partial,
     heard: heard ?? _state.heard,
     error: error ?? _state.error,
+    needsChef: needsChef ?? _state.needsChef,
   );
 
   void _emit(VoiceState state) {
@@ -391,6 +604,24 @@ class VoiceLoop {
     if (!_states.isClosed) _states.add(state);
   }
 }
+
+/// Whether [text] is the chef answering an instruction on its own:
+/// "Heard", "Yes, Chef", "Got it, Chef" and the like. It's strict, since it
+/// lets words through without "Hey Sous" and a busy kitchen says "yeah" a
+/// lot. The brain decides whether it really closes the instruction.
+bool isAcknowledgement(String text) {
+  final words = text
+      .toLowerCase()
+      .replaceAll(RegExp(r"[^a-z' ]"), ' ')
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .toList();
+  return words.length <= 4 && _acknowledgement.hasMatch(words.join(' '));
+}
+
+final _acknowledgement = RegExp(
+  r"^(?:heard|yes chef|oui chef|got it chef|understood|copy that)\b",
+);
 
 /// Whether [text] is the cook asking Sous to stop talking.
 bool isStopCommand(String text) {

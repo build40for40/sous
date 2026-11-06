@@ -34,6 +34,17 @@ abstract final class SherpaModels {
     folder: 'sherpa-onnx-moonshine-tiny-en-quantized-2026-02-27',
   );
 
+  /// A small streaming zipformer for spotting "Hey Sous". English.
+  static final kwsGigaspeech = VoiceModel(
+    id: 'kws-zipformer-gigaspeech-3.3M-2024-01-01',
+    url: _release(
+      'kws-models',
+      'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2',
+    ),
+    bytes: 17626723,
+    folder: 'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01',
+  );
+
   /// Kokoro fp32, for iPhone (int8 is slower on Apple chips).
   static final kokoro = VoiceModel(
     id: 'kokoro-en-v0_19',
