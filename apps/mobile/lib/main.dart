@@ -1,11 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'services.dart';
+
 void main() {
-  runApp(const MainApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  final services = SousServices();
+  unawaited(services.auth.restore());
+  runApp(MainApp(services: services));
 }
 
 class MainApp extends StatelessWidget {
-  const MainApp({super.key});
+  const MainApp({super.key, required this.services});
+
+  final SousServices services;
 
   @override
   Widget build(BuildContext context) {
