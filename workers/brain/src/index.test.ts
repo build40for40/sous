@@ -86,6 +86,7 @@ describe("/me", () => {
     const me = await response.json<{ preferences: Record<string, unknown>; about: string }>();
     expect(me.preferences).toEqual({ diet: [], avoid: ["coriander"], spice: "hot" });
     expect(me.about).toBe("# About me\n\nLoves a toastie.");
+    expect(me).toMatchObject({ learned: [] });
     expect(await (await call("/me", { user: "user_me2" })).json()).toMatchObject({ preferences: me.preferences });
   });
 
@@ -481,8 +482,11 @@ describe("/sessions", () => {
         note: expect.stringMatching(/^sessions\/\d{4}-\d{2}-\d{2}-fake-demo-cheese-toastie-[0-9a-f]{8}\.md$/),
       });
 
-      const me = await (await call("/me", { user })).json<{ about: string }>();
-      expect(me.about).toContain("## Learned while cooking\n\n- Hates coriander");
+      const me = await (await call("/me", { user })).json<{ about: string; learned: string[] }>();
+      expect(me.about).not.toContain("Learned while cooking");
+      expect(me.learned).toEqual(["Hates coriander"]);
+      await call("/me", { user, method: "PATCH", body: { about: me.about } });
+      expect(await (await call("/me", { user })).json()).toMatchObject({ learned: ["Hates coriander"] });
 
       const next = await startSession(user);
       const nextClaude = mockClaude({ content: [{ type: "text", text: "Back for another?" }] });

@@ -3,7 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { UserBrain } from "./brain";
 import type { Reflection } from "./reflection";
-import { addLines, editSection, londonDate, londonDay, rebuildLinks, replaceSessionLines, sessionNotePath, writeReflection, type ReflectedSession } from "./vault";
+import { addLines, editSection, londonDate, londonDay, rebuildLinks, replaceAbout, replaceSessionLines, sessionNotePath, splitLearned, writeReflection, type ReflectedSession } from "./vault";
 
 const recipe = { id: "recipe-1", slug: "fake-toastie", title: "Fake Toastie", source_url: "https://example.com/sous/fake-toastie" };
 
@@ -38,6 +38,31 @@ async function inVault<T>(name: string, run: (sql: SqlStorage) => T): Promise<T>
 const files = (sql: SqlStorage) => sql.exec<{ path: string; kind: string; frontmatter: string; body: string; updated_at: string }>("SELECT * FROM files ORDER BY path").toArray();
 const links = (sql: SqlStorage) => sql.exec<{ src: string; dst: string; kind: string }>("SELECT * FROM links ORDER BY src, dst").toArray();
 const body = (sql: SqlStorage, path: string) => sql.exec<{ body: string }>("SELECT body FROM files WHERE path = ?", path).one().body;
+
+describe("splitLearned and replaceAbout", () => {
+  const learnedBody = "# About me\n\nLoves a toastie.\n\n## Learned while cooking\n\n- Hates coriander ([[sessions/s1]])\n- Owns one pan ([[sessions/s2]])\n\n## Kit\n\n- a pan\n";
+
+  it("splits the free text from the learned entries", () => {
+    expect(splitLearned(learnedBody)).toEqual({ about: "# About me\n\nLoves a toastie.\n\n## Kit\n\n- a pan\n", learned: ["Hates coriander", "Owns one pan"] });
+  });
+
+  it("leaves a body with no learned section alone", () => {
+    expect(splitLearned("# About me")).toEqual({ about: "# About me", learned: [] });
+    expect(replaceAbout("# About me", "New text")).toBe("New text");
+  });
+
+  it("keeps the learned section when about is replaced, and a split then replace is stable", () => {
+    const replaced = replaceAbout(learnedBody, "# About me\n\nNow with more cheese.");
+    expect(replaced).toBe("# About me\n\nNow with more cheese.\n\n## Learned while cooking\n\n- Hates coriander ([[sessions/s1]])\n- Owns one pan ([[sessions/s2]])\n");
+    const { about } = splitLearned(learnedBody);
+    expect(replaceAbout(replaceAbout(learnedBody, about), about)).toBe(replaceAbout(learnedBody, about));
+    expect(splitLearned(replaceAbout(learnedBody, about))).toEqual(splitLearned(learnedBody));
+  });
+
+  it("drops a learned section sent in about, so it never duplicates", () => {
+    expect(replaceAbout(learnedBody, learnedBody)).toBe(replaceAbout(learnedBody, splitLearned(learnedBody).about));
+  });
+});
 
 describe("editSection", () => {
   it("adds a missing section at the end", () => {

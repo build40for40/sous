@@ -30,7 +30,7 @@ interface Topic {
 }
 
 const TOPIC_FOLDERS = { ingredient: "ingredients", technique: "techniques", cuisine: "cuisines" } as const;
-const LEARNED = "Learned while cooking";
+export const LEARNED = "Learned while cooking";
 
 export const londonDate = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(new Date(iso));
 export const londonDay = (iso: string) => new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", day: "numeric", month: "long", year: "numeric" }).format(new Date(iso));
@@ -183,8 +183,27 @@ function swap(s: { original: string; replacement: string; outcome: string }): st
   return `${s.replacement} instead of ${s.original}${s.outcome ? `: ${s.outcome}` : ""}`;
 }
 
+function entryText(line: string): string {
+  return line.replace(/^- /, "").replace(/ \(\[\[[^\]]*\]\]\)$/, "");
+}
+
 function preferenceText(line: string): string {
-  return line.replace(/^- /, "").replace(/ \(\[\[[^\]]*\]\]\)$/, "").toLowerCase();
+  return entryText(line).toLowerCase();
+}
+
+const hasLearned = (body: string) => body.split("\n").includes(`## ${LEARNED}`);
+const withoutLearned = (body: string) => (hasLearned(body) ? editSection(body, LEARNED, () => []) : body);
+
+/** Splits USER.md's body into the cook's free text and the entries Sou learned, without bullets or session links. */
+export function splitLearned(body: string): { about: string; learned: string[] } {
+  return { about: withoutLearned(body), learned: sectionLines(body, LEARNED).map(entryText) };
+}
+
+/** Replaces the free text of USER.md's body, keeping the learned section as it is. */
+export function replaceAbout(body: string, about: string): string {
+  const learned = sectionLines(body, LEARNED);
+  const free = withoutLearned(about);
+  return learned.length ? editSection(free, LEARNED, () => learned) : free;
 }
 
 function sectionLines(body: string, heading: string): string[] {
