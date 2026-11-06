@@ -15,7 +15,9 @@ const _grey = Color(0xFF7C7C80);
 const _faint = Color(0xFF1F1F21);
 const _accent = Color(0xFF6FA8FF);
 
-enum _Tab { sous, recipe, saved }
+/// Sous is home. The recipe slides up over it, and Saved slides in from the
+/// side.
+enum _View { sous, recipe, saved }
 
 /// A countdown Sous started.
 class _CookTimer {
@@ -43,7 +45,7 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> implements CookingTools {
-  _Tab _tab = _Tab.sous;
+  _View _view = _View.sous;
   late Future<List<Recipe>> _recipes = widget.services.brain.listRecipes();
   Recipe? _selected;
 
@@ -99,7 +101,7 @@ class _HomeState extends State<Home> implements CookingTools {
   @override
   Future<void> show(ShowView view) async {
     if (view == ShowView.ingredients || view == ShowView.step) {
-      setState(() => _tab = _Tab.recipe);
+      _go(_View.recipe);
     }
   }
 
@@ -108,7 +110,7 @@ class _HomeState extends State<Home> implements CookingTools {
   Future<void> _startCooking() async {
     final recipe = _selected;
     if (recipe?.id == null) {
-      setState(() => _tab = _Tab.saved);
+      _go(_View.saved);
       return;
     }
     await _sub?.cancel();
@@ -173,8 +175,12 @@ class _HomeState extends State<Home> implements CookingTools {
 
   void _open(Recipe r) => setState(() {
     _selected = r;
-    _tab = _Tab.recipe;
+    _view = _View.recipe;
   });
+
+  void _go(_View view) {
+    if (_view != view) setState(() => _view = view);
+  }
 
   // ---- Screens ----
 
@@ -183,45 +189,109 @@ class _HomeState extends State<Home> implements CookingTools {
     return Scaffold(
       backgroundColor: _black,
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            Expanded(
-              child: switch (_tab) {
-                _Tab.sous => _sousTab(),
-                _Tab.recipe => _recipeTab(),
-                _Tab.saved => _savedTab(),
-              },
+            // Sous is home: swipe up or down anywhere to see the recipe
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onVerticalDragEnd: (d) {
+                  if ((d.primaryVelocity ?? 0).abs() > 200) {
+                    _go(_View.recipe);
+                  }
+                },
+                child: _sousTab(),
+              ),
             ),
-            _tabs(),
+            _layer(_View.recipe, _recipeLayer(), from: const Offset(0, 1)),
+            _layer(_View.saved, _savedLayer(), from: const Offset(1, 0)),
           ],
         ),
       ),
     );
   }
 
-  Widget _tabs() => Padding(
-    padding: const EdgeInsets.only(top: 8, bottom: 14),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+  Widget _layer(_View view, Widget child, {required Offset from}) {
+    final shown = _view == view;
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: !shown,
+        child: AnimatedSlide(
+          offset: shown ? Offset.zero : from,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          child: ColoredBox(color: _black, child: child),
+        ),
+      ),
+    );
+  }
+
+  /// The recipe, over Sous. Swiping past the top or the bottom, or tapping
+  /// the handle, goes back to Sous.
+  Widget _recipeLayer() => GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onVerticalDragEnd: (d) {
+      if ((d.primaryVelocity ?? 0).abs() > 200) _go(_View.sous);
+    },
+    child: Column(
       children: [
-        for (final t in _Tab.values)
-          TextButton(
-            onPressed: () => setState(() => _tab = t),
-            child: Text(
-              switch (t) {
-                _Tab.sous => 'Sous',
-                _Tab.recipe => 'Recipe',
-                _Tab.saved => 'Saved',
-              },
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: _tab == t ? _text : _grey,
-              ),
+        GestureDetector(
+          onTap: () => _go(_View.sous),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 10, bottom: 6),
+            child: Column(
+              children: [
+                Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3A3A3C),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Swipe to go back to Sous',
+                  style: TextStyle(fontSize: 12, color: _grey),
+                ),
+              ],
             ),
           ),
+        ),
+        Expanded(
+          child: NotificationListener<ScrollUpdateNotification>(
+            onNotification: (n) {
+              final m = n.metrics;
+              if (n.dragDetails != null &&
+                  (m.pixels < m.minScrollExtent - 70 ||
+                      m.pixels > m.maxScrollExtent + 70)) {
+                _go(_View.sous);
+              }
+              return false;
+            },
+            child: _recipeTab(),
+          ),
+        ),
       ],
     ),
+  );
+
+  Widget _savedLayer() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.only(left: 12, top: 6),
+        child: TextButton.icon(
+          onPressed: () => _go(_View.sous),
+          icon: const Icon(Icons.chevron_left, color: _grey),
+          label: const Text(
+            'Sous',
+            style: TextStyle(fontSize: 16, color: _grey),
+          ),
+        ),
+      ),
+      Expanded(child: _savedTab()),
+    ],
   );
 
   String get _caption {
@@ -248,15 +318,35 @@ class _HomeState extends State<Home> implements CookingTools {
       padding: const EdgeInsets.symmetric(horizontal: 28),
       child: Column(
         children: [
-          const SizedBox(height: 20),
-          Text(
-            (_selected?.title ?? 'Tonight').toUpperCase(),
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              letterSpacing: .3,
-              color: _grey,
-            ),
+          Row(
+            children: [
+              TextButton(
+                onPressed: () => _go(_View.saved),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                child: const Text(
+                  'Saved',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: _grey,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  (_selected?.title ?? 'Tonight').toUpperCase(),
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: .3,
+                    color: _grey,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 48),
+            ],
           ),
           Expanded(
             flex: 5,
@@ -331,6 +421,24 @@ class _HomeState extends State<Home> implements CookingTools {
                 ),
               ),
             ),
+          if (_selected != null)
+            GestureDetector(
+              onTap: () => _go(_View.recipe),
+              child: const Padding(
+                padding: EdgeInsets.only(top: 10, bottom: 12),
+                child: Column(
+                  children: [
+                    Icon(Icons.keyboard_arrow_up, color: _grey, size: 22),
+                    Text(
+                      'Swipe for the recipe',
+                      style: TextStyle(fontSize: 12, color: _grey),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            const SizedBox(height: 16),
         ],
       ),
     );
@@ -348,7 +456,10 @@ class _HomeState extends State<Home> implements CookingTools {
     final current = cookingThis ? _cooking.stepIndex : null;
     final minutes = r.times?.totalMinutes;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(28, 24, 28, 24),
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
       children: [
         Text(
           r.title,
@@ -464,7 +575,7 @@ class _HomeState extends State<Home> implements CookingTools {
             await _recipes;
           },
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(28, 24, 28, 24),
+            padding: const EdgeInsets.fromLTRB(28, 8, 28, 24),
             children: [
               const Text(
                 'Saved',
