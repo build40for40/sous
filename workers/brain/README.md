@@ -8,8 +8,8 @@ Everything lives under `/sous/api/v1` and needs a WorkOS access token as `Author
 
 | route | does |
 | --- | --- |
-| `GET /me` | `{id, preferences, about, updated_at}`: `USER.md`'s frontmatter and body |
-| `PATCH /me` | `{preferences?, about?}`. Preferences merge into what's there and a `null` value removes a key; `about` replaces the body |
+| `GET /me` | `{id, preferences, about, learned, updated_at}`: `USER.md`'s frontmatter and body. `about` is the body without the `## Learned while cooking` section; `learned` is that section's entries as plain strings (no bullet, no session link), `[]` if there are none |
+| `PATCH /me` | `{preferences?, about?}`. Preferences merge into what's there and a `null` value removes a key; `about` replaces only the free text and always keeps the learned section, so a `GET` then `PATCH` of `about` is stable (a learned section sent inside `about` is ignored). Returns the same shape as `GET /me` |
 | `DELETE /me` | wipes the user's Durable Object, then deletes the WorkOS user. `204`, or `502` if WorkOS fails (retry is safe) |
 | `GET /recipes` | `{recipes}`, newest first |
 | `POST /recipes` | a recipe that validates against `packages/contracts`. The brain sets `id`, `slug`, `created_at` and `updated_at`, ignoring any sent. `201` with the saved recipe, or `400 {"error": "invalid_recipe", issues}` |

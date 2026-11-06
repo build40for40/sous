@@ -6,6 +6,7 @@ import { readDigest } from "./digest";
 import { SCHEMA_VERSION } from "./schema";
 import { demoRecipe } from "./seed";
 import { fakeReflection, mockClaude } from "./testing";
+import { writeReflection } from "./vault";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -54,6 +55,39 @@ describe("UserBrain", () => {
     await runInDurableObject(brainFor("user_big"), (brain: UserBrain) => {
       expect(brain.updateProfile({ preferences: { notes: "x".repeat(20_000) } })).toBeNull();
       expect(brain.getProfile().preferences).not.toHaveProperty("notes");
+    });
+  });
+
+  it("keeps what Sou learned when about is replaced, and reads it back as a list", async () => {
+    await runInDurableObject(brainFor("user_learned"), (brain: UserBrain, state) => {
+      const recipe = brain.listRecipes()[0];
+      writeReflection(state.storage.sql, { id: "aaaaaaaa-1111-4111-8111-111111111111", started_at: "2026-11-06T18:00:00Z", recipe, notes: null, reflection: { ...fakeReflection, rating: 5 } }, "2026-11-06T19:00:00Z");
+
+      const before = brain.getProfile();
+      expect(before.learned).toEqual(fakeReflection.preferences);
+      expect(before.about).not.toContain("Learned while cooking");
+
+      const patched = brain.updateProfile({ about: "# About me\n\nLoves a toastie." })!;
+      expect(patched.about).toBe("# About me\n\nLoves a toastie.\n");
+      expect(patched.learned).toEqual(before.learned);
+
+      const roundTrip = brain.updateProfile({ about: brain.getProfile().about })!;
+      expect(roundTrip.learned).toEqual(before.learned);
+      expect(roundTrip.about).toBe(patched.about);
+
+      brain.updateProfile({ preferences: { units: "imperial" } });
+      expect(brain.getProfile().learned).toEqual(before.learned);
+    });
+  });
+
+  it("keeps learned lines out of about but in what the model reads", async () => {
+    await runInDurableObject(brainFor("user_learned_model"), (brain: UserBrain, state) => {
+      const recipe = brain.listRecipes()[0];
+      writeReflection(state.storage.sql, { id: "aaaaaaaa-1111-4111-8111-111111111111", started_at: "2026-11-06T18:00:00Z", recipe, notes: null, reflection: { ...fakeReflection, rating: 5 } }, "2026-11-06T19:00:00Z");
+      brain.updateProfile({ about: "Fresh text." });
+      const stored = state.storage.sql.exec<{ body: string }>("SELECT body FROM files WHERE path = 'USER.md'").one().body;
+      expect(stored).toContain("Fresh text.");
+      expect(stored).toContain(`## Learned while cooking\n\n- ${fakeReflection.preferences[0]}`);
     });
   });
 
@@ -137,7 +171,7 @@ describe("UserBrain", () => {
         expect(brain.getSession(done)).toBeNull();
         expect(readDigest(state.storage.sql, brain.getProfile(), new Date()).candidates).toEqual([]);
         expect(state.storage.sql.exec("SELECT path FROM files ORDER BY path").toArray()).toEqual([{ path: "USER.md" }]);
-        expect(brain.getProfile().about).toContain("Hates coriander");
+        expect(brain.getProfile().learned).toContain("Hates coriander");
 
         const claude = mockClaude();
         await brain.alarm();

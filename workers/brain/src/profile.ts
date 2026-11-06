@@ -11,6 +11,10 @@ export interface Profile {
   updated_at: string;
 }
 
+export interface PublicProfile extends Profile {
+  learned: string[];
+}
+
 export interface ProfilePatch {
   preferences?: Preferences;
   about?: string;

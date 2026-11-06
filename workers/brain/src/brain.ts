@@ -5,7 +5,7 @@ import { createClient, liveModel } from "./claude";
 import { readDigest } from "./digest";
 import { listCooks, type Cook } from "./history";
 import { error, HttpError } from "./http";
-import { applyPreferences, USER_MD, type Preferences, type Profile, type ProfilePatch } from "./profile";
+import { applyPreferences, USER_MD, type Preferences, type Profile, type ProfilePatch, type PublicProfile } from "./profile";
 import { assembleContext, MAX_LINKED_NOTES, MEMORY_MD, openingLine, recipeNotePath, type Note } from "./prompt";
 import { fromRow, slugify, toRow, type NewRecipe, type RecipeRow } from "./recipes";
 import { isRetryable, reflect, type EndRequest, type Rating, type Reflection } from "./reflection";
@@ -14,7 +14,7 @@ import { demoRecipe, starterAbout, starterPreferences } from "./seed";
 import { suggest, SUGGEST_MODEL, type Suggestion } from "./suggest";
 import { appendTurnRequest, requestTurns, sse, type NewSession, type SessionRow } from "./sessions";
 import { runTurn, type TurnOutcome } from "./turn";
-import { deleteRecipeCascade, writeReflection } from "./vault";
+import { deleteRecipeCascade, replaceAbout, splitLearned, writeReflection } from "./vault";
 
 interface NoteRow extends Record<string, SqlStorageValue> {
   path: string;
@@ -75,18 +75,23 @@ export class UserBrain extends DurableObject<Env> {
     this.insertRecipe(demoRecipe, now);
   }
 
-  getProfile(): Profile {
+  getProfile(): PublicProfile {
+    const { about, ...rest } = this.readUserMd();
+    return { ...rest, ...splitLearned(about) };
+  }
+
+  private readUserMd(): Profile {
     this.init();
     const row = this.sql.exec<FileRow>("SELECT frontmatter, body, updated_at FROM files WHERE path = ?", USER_MD).toArray()[0];
     if (!row) return { preferences: {}, about: "", updated_at: new Date(0).toISOString() };
     return { preferences: JSON.parse(row.frontmatter), about: row.body, updated_at: row.updated_at };
   }
 
-  updateProfile(patch: ProfilePatch): Profile | null {
-    const current = this.getProfile();
+  updateProfile(patch: ProfilePatch): PublicProfile | null {
+    const current = this.readUserMd();
     const preferences = patch.preferences ? applyPreferences(current.preferences, patch.preferences) : current.preferences;
     if (!preferences) return null;
-    this.writeUserMd(preferences, patch.about ?? current.about, new Date().toISOString());
+    this.writeUserMd(preferences, patch.about === undefined ? current.about : replaceAbout(current.about, patch.about), new Date().toISOString());
     return this.getProfile();
   }
 
@@ -242,7 +247,7 @@ export class UserBrain extends DurableObject<Env> {
     if (!this.env.ANTHROPIC_API_KEY) return "suggestions_unavailable";
     const started = Date.now();
     try {
-      const digest = readDigest(this.sql, this.getProfile(), new Date());
+      const digest = readDigest(this.sql, this.readUserMd(), new Date());
       const { suggestions, usage } = await suggest(createClient(this.env.ANTHROPIC_API_KEY), digest);
       console.log(JSON.stringify({ event: "sous_suggest", model: SUGGEST_MODEL, candidates: digest.candidates.length, suggested: suggestions.length, total_ms: Date.now() - started, usage }));
       return suggestions;
@@ -281,7 +286,7 @@ export class UserBrain extends DurableObject<Env> {
   private async reflectSession(client: Anthropic, row: SessionRow): Promise<void> {
     const started = Date.now();
     const recipe = this.getRecipe(row.recipe_id);
-    const { preferences, about } = this.getProfile();
+    const { preferences, about } = this.readUserMd();
     const rating = (row.rating as Rating | null) ?? null;
     const { reflection, usage } = await reflect(client, { recipe, user: { preferences, about }, turns: JSON.parse(row.turns), facts: JSON.parse(row.facts), rating, notes: row.notes });
     const note = this.ctx.storage.transactionSync(() => {
@@ -314,7 +319,7 @@ export class UserBrain extends DurableObject<Env> {
   }
 
   private assembleContext(recipe: Recipe, opening: string): string {
-    const { preferences, about } = this.getProfile();
+    const { preferences, about } = this.readUserMd();
     const notePath = recipeNotePath(recipe.slug!);
     const note = (path: string) => this.sql.exec<NoteRow>("SELECT path, frontmatter, body FROM files WHERE path = ?", path).toArray()[0] ?? null;
     const sessionNotes = this.sql
