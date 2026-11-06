@@ -9,7 +9,7 @@ apps/mobile/          Flutter app
 workers/brain/        Worker and UserBrain Durable Object (empty)
 workers/web/          landing page at build40for40.com/sous (empty)
 workers/extract/      extraction, if it needs a server (empty)
-packages/contracts/   recipe and session JSON Schemas (empty)
+packages/contracts/   recipe and session JSON Schemas and the cooking tools
 .github/workflows/    CI, filtered by path
 ```
 
@@ -38,5 +38,6 @@ dart format .                     # format
 
 - `.github/workflows/ci.yml` runs on PRs and pushes to `main` that touch `apps/mobile/` or the workflow itself: format check, analyze, tests, then an Android debug build and an iOS build without codesigning.
 - `.github/workflows/build.yml` runs on merges to `main` that touch `apps/mobile/` or the workflow itself (or manually): release APK + AAB and an unsigned iOS `Runner.app`, uploaded as workflow artifacts for 30 days. The build number is the workflow run number.
+- `.github/workflows/contracts.yml` runs on PRs and pushes to `main` that touch `packages/contracts/` or the workflow itself: typecheck and tests. See `packages/contracts/README.md`.
 
 Signing and store upload aren't wired yet. That checklist lives on the Superthread `day5` board ("Publish Sous to the App Store and Google Play").

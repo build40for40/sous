@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://build40for40.com/sous/schemas/recipe.schema.json",
+  "title": "Recipe",
+  "description": "A recipe Sous can cook from. Extraction produces it, the brain reads it, the app shows it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "ingredients", "steps"],
+  "properties": {
+    "id": {
+      "description": "Set by the brain when the recipe is saved. Leave it out when posting a new recipe.",
+      "type": "string",
+      "minLength": 1
+    },
+    "slug": {
+      "description": "Set by the brain from the title, unique per user. Names the recipe's vault note.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_url": {
+      "description": "Where the recipe came from, usually the Instagram post.",
+      "type": "string",
+      "format": "uri"
+    },
+    "servings": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "times": {
+      "$ref": "#/$defs/Times"
+    },
+    "ingredients": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Ingredient" }
+    },
+    "steps": {
+      "description": "In cooking order. go_to_step uses the zero-based index into this list.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Step" }
+    },
+    "created_at": {
+      "description": "Set by the brain.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "description": "Set by the brain.",
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "Times": {
+      "description": "Rough times in whole minutes. Any of them can be missing.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prep_minutes": { "type": "integer", "minimum": 0 },
+        "cook_minutes": { "type": "integer", "minimum": 0 },
+        "total_minutes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Ingredient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "What it is, e.g. \"spring onions\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "description": "How much, as a number (0.5 for half). Missing for \"to taste\" or \"a pinch\".",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "unit": {
+          "description": "Unit for the quantity, e.g. \"g\", \"tbsp\", \"cloves\". Missing for countable things like \"2 eggs\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "description": "Prep or wording that doesn't fit the other fields, e.g. \"finely sliced\" or \"to taste\".",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "Step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": {
+          "description": "The instruction, written to be read aloud.",
+          "type": "string",
+          "minLength": 1
+        },
+        "done_cue": {
+          "description": "What done looks, smells or sounds like, e.g. \"deep golden and jammy\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "duration_seconds": {
+          "description": "How long the step usually takes, when the recipe says. Handy for start_timer.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+name: Contracts
+
+on:
+  pull_request:
+    paths:
+      - packages/contracts/**
+      - .github/workflows/contracts.yml
+  push:
+    branches: [main]
+    paths:
+      - packages/contracts/**
+      - .github/workflows/contracts.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: packages/contracts
+
+concurrency:
+  group: contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/contracts/.node-version
+          cache: npm
+          cache-dependency-path: packages/contracts/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

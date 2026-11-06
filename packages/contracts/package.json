@@ -1,0 +1,23 @@
+{
+  "name": "@sous/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Recipe and session JSON Schemas and tool definitions shared by the Sous app and Workers.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas/*": "./schemas/*",
+    "./tools.json": "./tools.json",
+    "./examples/*": "./examples/*"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

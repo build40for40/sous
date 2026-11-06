@@ -1,0 +1,102 @@
+[
+  {
+    "name": "start_timer",
+    "description": "Start a countdown timer on the cook's phone. Use it whenever a step has a fixed time, or the cook asks for one. The result is the new timer's id; keep it to cancel the timer later.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "seconds"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Short name read aloud when the timer ends, e.g. \"pasta\" or \"onions\". Never empty."
+        },
+        "seconds": {
+          "type": "integer",
+          "description": "How long the timer runs, in whole seconds. At least 1."
+        }
+      }
+    }
+  },
+  {
+    "name": "cancel_timer",
+    "description": "Cancel a running timer on the cook's phone, e.g. when the cook says the pasta's already done.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timer_id"],
+      "properties": {
+        "timer_id": {
+          "type": "string",
+          "description": "The id start_timer returned."
+        }
+      }
+    }
+  },
+  {
+    "name": "go_to_step",
+    "description": "Move the cook to a step of the recipe. Use it when you start talking them through a different step, forwards or back.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index"],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "description": "Zero-based index into the recipe's steps. 0 is the first step."
+        }
+      }
+    }
+  },
+  {
+    "name": "set_stage",
+    "description": "Move the session to another stage when the cook moves on: decide (pick what to cook), prep (mise en place), cook, present (plating and serving), feedback (how it went).",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage"],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": ["decide", "prep", "cook", "present", "feedback"]
+        }
+      }
+    }
+  },
+  {
+    "name": "show",
+    "description": "Put something on the cook's screen for a glance: the current step, the ingredient list, or what done looks like for the current step.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["view"],
+      "properties": {
+        "view": {
+          "type": "string",
+          "enum": ["step", "ingredients", "done_cue"]
+        }
+      }
+    }
+  },
+  {
+    "name": "note",
+    "description": "Save a fact about the cook worth remembering next time, e.g. \"hates coriander\" or \"likes their eggs runny\". It's kept for after the cook; the cook doesn't see it.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fact"],
+      "properties": {
+        "fact": {
+          "type": "string",
+          "description": "One short fact, in plain words. Never empty."
+        }
+      }
+    }
+  }
+]
