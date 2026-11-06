@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.build40for40.sous"
-    compileSdk = flutter.compileSdkVersion
+    // receive_sharing_intent 1.9 needs API 37 to compile against. Only the compile
+    // SDK moves; minSdk and targetSdk (which devices, which runtime behaviour) stay Flutter's.
+    compileSdk = maxOf(flutter.compileSdkVersion, 37)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
