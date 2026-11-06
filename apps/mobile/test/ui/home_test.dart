@@ -87,13 +87,13 @@ void main() {
     await settle(tester);
   }
 
-  Future<void> tab(WidgetTester tester, String name) async {
-    await tester.tap(find.widgetWithText(TextButton, name));
+  Future<void> showSaved(WidgetTester tester) async {
+    await tester.tap(find.widgetWithText(TextButton, 'Saved'));
     await settle(tester);
   }
 
   Future<void> pick(WidgetTester tester) async {
-    await tab(tester, 'Saved');
+    await showSaved(tester);
     await tester.tap(find.text('Fake Tadka Dahl'));
     await settle(tester);
   }
@@ -108,7 +108,7 @@ void main() {
 
   testWidgets('Saved', (tester) async {
     await open(tester);
-    await tab(tester, 'Saved');
+    await showSaved(tester);
     await expectLater(
       find.byType(MainApp),
       matchesGoldenFile('goldens/home_saved.png'),
@@ -127,7 +127,8 @@ void main() {
   testWidgets('Sous with timers, one done', (tester) async {
     await open(tester);
     await pick(tester);
-    await tab(tester, 'Sous');
+    await tester.tap(find.text('Swipe to go back to Sous'));
+    await settle(tester);
     final tools = tester.state(find.byType(Home)) as CookingTools;
     await tools.startTimer('rice', 12 * 60);
     await tools.startTimer('dahl', 20);

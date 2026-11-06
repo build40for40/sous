@@ -365,10 +365,13 @@ class _HomeState extends State<Home> implements CookingTools {
               child: Semantics(
                 button: true,
                 label: 'Talk to Sous',
-                child: Flame(
-                  mood: _mood,
-                  alert: _alert,
-                  alignment: const Alignment(0, .37),
+                child: TickerMode(
+                  enabled: _view == _View.sous,
+                  child: Flame(
+                    mood: _mood,
+                    alert: _alert,
+                    alignment: const Alignment(0, .45),
+                  ),
                 ),
               ),
             ),
@@ -385,7 +388,7 @@ class _HomeState extends State<Home> implements CookingTools {
                   TimerReadout(label: t.label, left: t.left(now)),
               ],
             ),
-          const Spacer(),
+          const Spacer(flex: 2),
           if (_session != null && _cooking.phase != CookingPhase.failed)
             TextField(
               controller: _say,

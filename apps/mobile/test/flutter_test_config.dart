@@ -18,6 +18,14 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
     );
   }
   await inter.load();
+  final icons = File(
+    '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+  );
+  if (icons.existsSync()) {
+    await (FontLoader(
+      'MaterialIcons',
+    )..addFont(icons.readAsBytes().then(ByteData.sublistView))).load();
+  }
   final comparator = goldenFileComparator;
   if (comparator is LocalFileComparator) {
     goldenFileComparator = _NearEnough(
