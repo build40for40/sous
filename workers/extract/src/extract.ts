@@ -211,7 +211,7 @@ export function toExtraction(raw: RawExtraction, sourceUrl: string | null): Extr
   };
   const valid = recipeValidator.validate(recipe);
   if (!valid.valid) {
-    // Usually no ingredients or no steps: not something Sou can cook from.
+    // Usually no ingredients or no steps: not something Sous can cook from.
     return { ...base, status: "needs_screenshot", reason: "Sous found the dish but not enough of the recipe to cook from.", source_used: "none", completeness: "none", recipe: null };
   }
   return { ...base, status: "recipe", source_used: raw.source_used === "none" ? "caption" : raw.source_used, completeness: raw.completeness === "none" ? "partial" : raw.completeness, recipe };
