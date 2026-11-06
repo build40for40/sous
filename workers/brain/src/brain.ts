@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Recipe, Session, StreamEvent, Turn, TurnRequest } from "@sous/contracts";
 import { createClient, liveModel } from "./claude";
+import { readDigest } from "./digest";
+import { listCooks, type Cook } from "./history";
 import { error, HttpError } from "./http";
 import { applyPreferences, USER_MD, type Preferences, type Profile, type ProfilePatch } from "./profile";
 import { assembleContext, MAX_LINKED_NOTES, MEMORY_MD, openingLine, recipeNotePath, type Note } from "./prompt";
@@ -9,6 +11,7 @@ import { fromRow, slugify, toRow, type NewRecipe, type RecipeRow } from "./recip
 import { isRetryable, reflect, type EndRequest, type Rating, type Reflection } from "./reflection";
 import { migrate } from "./schema";
 import { demoRecipe, starterAbout, starterPreferences } from "./seed";
+import { suggest, SUGGEST_MODEL, type Suggestion } from "./suggest";
 import { appendTurnRequest, requestTurns, sse, type NewSession, type SessionRow } from "./sessions";
 import { runTurn, type TurnOutcome } from "./turn";
 import { writeReflection } from "./vault";
@@ -221,6 +224,27 @@ export class UserBrain extends DurableObject<Env> {
     };
     const status: ReflectionStatus = !row.ended_at ? "not_ended" : row.reflected_at ? "done" : row.reflection_error ? "failed" : "pending";
     return { session, reflection: row.reflection ? JSON.parse(row.reflection) : null, reflection_status: status, reflected_at: row.reflected_at };
+  }
+
+  listHistory(): Cook[] {
+    this.init();
+    return listCooks(this.sql);
+  }
+
+  /** Asks Sonnet what to cook from the saved recipes, given a digest of the vault. Returns an error code instead of throwing so it survives the RPC boundary. */
+  async suggest(): Promise<Suggestion[] | "suggestions_unavailable" | "suggestions_failed"> {
+    this.init();
+    if (!this.env.ANTHROPIC_API_KEY) return "suggestions_unavailable";
+    const started = Date.now();
+    try {
+      const digest = readDigest(this.sql, this.getProfile(), new Date());
+      const { suggestions, usage } = await suggest(createClient(this.env.ANTHROPIC_API_KEY), digest);
+      console.log(JSON.stringify({ event: "sous_suggest", model: SUGGEST_MODEL, candidates: digest.candidates.length, suggested: suggestions.length, total_ms: Date.now() - started, usage }));
+      return suggestions;
+    } catch (e) {
+      console.error(JSON.stringify({ event: "sous_suggest_failed", model: SUGGEST_MODEL, error: String(e) }));
+      return "suggestions_failed";
+    }
   }
 
   /** Reflects on every ended session that hasn't been yet. Throwing makes Cloudflare retry the alarm with backoff. */

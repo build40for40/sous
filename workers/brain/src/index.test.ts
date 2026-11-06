@@ -529,3 +529,87 @@ describe("/sessions", () => {
     });
   });
 });
+
+describe("/history and /suggest", () => {
+  const stub = (user: string) => env.USER_BRAIN.get(env.USER_BRAIN.idFromName(user));
+  const miso = { ...recipe, title: "Fake Miso Salmon", ingredients: [{ name: "miso" }, { name: "salmon" }] };
+  const curry = { ...recipe, title: "Fake Coriander Curry", ingredients: [{ name: "coriander" }] };
+
+  async function saveRecipe(user: string, body: unknown): Promise<string> {
+    return (await (await call("/recipes", { user, method: "POST", body })).json<{ id: string }>()).id;
+  }
+
+  async function cook(user: string, recipeId: string, rating: number, ingredients: string[]): Promise<void> {
+    const started = await call("/sessions", { user, method: "POST", body: { recipe_id: recipeId } });
+    const { id } = await started.json<{ id: string }>();
+    expect((await call(`/sessions/${id}/end`, { user, method: "POST", body: { rating } })).status).toBe(202);
+    mockClaude({ content: [{ type: "text", text: JSON.stringify({ ...fakeReflection, rating, ingredients }) }] });
+    expect(await runDurableObjectAlarm(stub(user))).toBe(true);
+  }
+
+  it("needs a token and only answers GET", async () => {
+    for (const path of ["/history", "/suggest"]) {
+      expect((await call(path)).status).toBe(401);
+      expect((await call(path, { user: "user_hsMethods", method: "POST" })).status).toBe(405);
+    }
+  });
+
+  it("starts with an empty history without calling Claude, and suggests saved recipes", async () => {
+    const user = "user_hsEmpty";
+    const claude = mockClaude();
+    expect(await (await call("/history", { user })).json()).toEqual({ cooks: [] });
+    expect(claude.requests).toEqual([]);
+
+    const id = await saveRecipe(user, miso);
+    mockClaude({ content: [{ type: "text", text: JSON.stringify({ suggestions: [{ recipe_id: id, reason: "Fresh and quick." }] }) }] });
+    const response = await call("/suggest", { user });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ suggestions: [{ recipe_id: id, title: "Fake Miso Salmon", reason: "Fresh and quick." }] });
+  });
+
+  it("shows a badly rated cook in /history and stops suggesting it, while a loved one comes back", async () => {
+    const user = "user_hsFull";
+    const salmonId = await saveRecipe(user, miso);
+    const curryId = await saveRecipe(user, curry);
+    await cook(user, salmonId, 5, ["miso", "salmon"]);
+    await cook(user, curryId, 1, ["coriander"]);
+
+    const history = await call("/history", { user });
+    expect(history.status).toBe(200);
+    const { cooks } = await history.json<{ cooks: { recipe_id: string; recipe_title: string; rating: number; date: string; summary: string; reflection_status: string }[] }>();
+    expect(cooks.map((c) => [c.recipe_title, c.rating, c.reflection_status])).toEqual([
+      ["Fake Coriander Curry", 1, "done"],
+      ["Fake Miso Salmon", 5, "done"],
+    ]);
+    expect(cooks[0]).toMatchObject({ recipe_id: curryId, date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), summary: "Golden toastie, cheese a touch underdone." });
+
+    const claude = mockClaude({
+      content: [{ type: "text", text: JSON.stringify({ suggestions: [{ recipe_id: curryId, reason: "Spicy." }, { recipe_id: salmonId, reason: "You gave it five stars." }, { recipe_id: "invented", reason: "Trust me." }] }) }],
+    });
+    const response = await call("/suggest", { user });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ suggestions: [{ recipe_id: salmonId, title: "Fake Miso Salmon", reason: "You gave it five stars." }] });
+
+    expect(claude.requests).toHaveLength(1);
+    expect(claude.requests[0]).toMatchObject({ model: "claude-sonnet-5-5", output_config: { format: { type: "json_schema" } } });
+    const sent = claude.requests[0].messages[0].content as string;
+    expect(sent).toContain(`id=${salmonId} | Fake Miso Salmon | cooked 1 time`);
+    expect(sent).toContain("- Fake Coriander Curry, latest rating 1/5");
+    expect(sent).not.toContain(`id=${curryId}`);
+    expect(sent).toContain("- miso: 1 cook, 1 loved, 0 rated badly");
+  });
+
+  it("reports a Claude failure without making anything up", async () => {
+    mockClaude({ status: 400, message: "nope" });
+    const response = await call("/suggest", { user: "user_hsFail" });
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "suggestions_failed" });
+  });
+
+  it("keeps each user's history to themselves", async () => {
+    const user = "user_hsOwner";
+    await cook(user, await saveRecipe(user, miso), 4, ["miso"]);
+    expect((await (await call("/history", { user })).json<{ cooks: unknown[] }>()).cooks).toHaveLength(1);
+    expect((await (await call("/history", { user: "user_hsOther" })).json<{ cooks: unknown[] }>()).cooks).toHaveLength(0);
+  });
+});
