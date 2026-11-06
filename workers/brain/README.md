@@ -25,7 +25,7 @@ Everything lives under `/sous/api/v1` and needs a WorkOS access token as `Author
 - `WORKOS_CLIENT_ID` (var in `wrangler.jsonc`): the shared AuthKit application's production client id. Public.
 - `WORKOS_API_KEY` (secret, declared in `wrangler.jsonc`, never committed): only `DELETE /me` uses it, and it returns `503` without it. For local dev put it in `.dev.vars` (see `.dev.vars.example`).
 
-There are no routes yet, so nothing is served: the deploy step adds the `build40for40.com/sous/api/*` zone routes and the CI deploy.
+`wrangler.jsonc` routes `build40for40.com/sous/api` and `build40for40.com/sous/api/*` on the `build40for40.com` zone, the same pattern as Sidekick. The rest of `/sous` is left for the landing page.
 
 ## Commands
 
@@ -40,3 +40,17 @@ npm run wrangler -- <args>     # wrangler as the 40for40 profile
 ```
 
 Tests sign tokens with a key pair generated per run and serve its JWKS from a mocked `fetch`, so they never reach WorkOS. CI runs typecheck and tests on every PR that touches `workers/brain/` or `packages/contracts/` (`.github/workflows/brain.yml`). Never deploy by hand.
+
+## Deploy
+
+`.github/workflows/brain-deploy.yml` deploys on every push to `main` that touches `workers/brain/` or `packages/contracts/`, and on manual dispatch. It runs typecheck and tests first, so PR CI (`brain.yml`) needs no secrets. Never deploy by hand.
+
+Secrets are org-level GitHub secrets on `build40for40`, visible to the sous repo:
+
+- `CLOUDFLARE_API_TOKEN`: already exists. The account id comes from `wrangler.jsonc`, so there is no account id secret.
+- `ANTHROPIC_API_KEY` and `WORKOS_API_KEY`: a human adds both. Each deploy passes whichever are set to the Worker as Worker secrets (via the `secrets` input of `cloudflare/wrangler-action`), and skips any that are missing, so the deploy itself still succeeds. Nobody runs `wrangler secret put` by hand.
+
+What a human still has to do:
+
+1. Add the `ANTHROPIC_API_KEY` and `WORKOS_API_KEY` org secrets, visible to the sous repo, then re-run the deploy workflow.
+2. Add the `sous://` callback to the shared WorkOS application's Staging and Production environments, without changing Joyo's defaults.
