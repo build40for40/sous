@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import '../cooking/cooking_session.dart';
 import 'audio_io.dart';
 import 'local/platform_audio_io.dart';
+import 'local/platform_text_to_speech.dart';
 import 'local/sherpa_models.dart';
 import 'local/sherpa_speech_to_text.dart';
 import 'local/sherpa_text_to_speech.dart';
@@ -20,21 +21,34 @@ import 'wake_word.dart';
 /// cloud engine plugs in here without touching [VoiceLoop].
 enum VoiceEngine { local }
 
+/// Who renders Sous's voice: the phone's own text to speech, or Kitten
+/// (Android) and Kokoro (iPhone) through sherpa-onnx, which need espeak-ng
+/// and stay silent since sherpa_onnx 2.0.1 dropped it.
+enum SpeechVoice { platform, sherpa }
+
 class VoiceConfig {
   const VoiceConfig({
     this.engine = VoiceEngine.local,
+    this.speechVoice = SpeechVoice.platform,
     this.duplex = DuplexMode.half,
     this.lightModels = false,
     this.keywordSpotting = true,
   });
 
   /// Reads `--dart-define=SOUS_VOICE_ENGINE=local`,
+  /// `--dart-define=SOUS_SPEECH_VOICE=sherpa`,
   /// `--dart-define=SOUS_FULL_DUPLEX=true`,
   /// `--dart-define=SOUS_LIGHT_VOICE_MODELS=true` and
   /// `--dart-define=SOUS_WAKE_WORD=false`.
   factory VoiceConfig.fromEnvironment() => VoiceConfig(
     engine: VoiceEngine.values.byName(
       const String.fromEnvironment('SOUS_VOICE_ENGINE', defaultValue: 'local'),
+    ),
+    speechVoice: SpeechVoice.values.byName(
+      const String.fromEnvironment(
+        'SOUS_SPEECH_VOICE',
+        defaultValue: 'platform',
+      ),
     ),
     duplex: const bool.fromEnvironment('SOUS_FULL_DUPLEX')
         ? DuplexMode.full
@@ -47,6 +61,7 @@ class VoiceConfig {
   );
 
   final VoiceEngine engine;
+  final SpeechVoice speechVoice;
   final DuplexMode duplex;
 
   /// Moonshine tiny instead of base, for phones that struggle.
@@ -86,17 +101,19 @@ class Voice {
               ? SherpaModels.moonshineTiny
               : SherpaModels.moonshineBase,
         );
-        final tts = SherpaTextToSpeech(
-          models: downloader,
-          voice: Platform.isIOS ? SherpaVoice.kokoro : SherpaVoice.kitten,
-        );
+        final sherpaTts = config.speechVoice == SpeechVoice.sherpa
+            ? SherpaTextToSpeech(
+                models: downloader,
+                voice: Platform.isIOS ? SherpaVoice.kokoro : SherpaVoice.kitten,
+              )
+            : null;
         final wake = config.keywordSpotting
             ? SherpaWakeWord(models: downloader)
             : null;
         return Voice(
           audio: PlatformAudioIO(),
           speechToText: stt,
-          textToSpeech: tts,
+          textToSpeech: sherpaTts ?? PlatformTextToSpeech(),
           wakeWord: wake,
           settings: VoiceLoopSettings(
             duplex: config.duplex,
@@ -106,7 +123,7 @@ class Voice {
           ),
           models: [
             ...stt.requiredModels,
-            ...tts.requiredModels,
+            ...?sherpaTts?.requiredModels,
             ...?wake?.requiredModels,
           ],
           downloader: downloader,
