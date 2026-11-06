@@ -5,7 +5,7 @@ The shapes extraction, the brain and the app agree on. The JSON files are the so
 ```
 schemas/recipe.schema.json    a recipe: title, source, servings, times, ingredients, steps with done cues
 schemas/session.schema.json   a cooking session, plus the /turns request body and SSE events in $defs
-tools.json                    the six cooking tools, in Claude Messages API format
+tools.json                    the seven cooking tools, in Claude Messages API format
 examples/                     one obviously fake recipe and session that validate
 src/                          TypeScript entry point: the schemas, the tools and matching types
 ```
@@ -21,22 +21,22 @@ Change a shape here first, in its own PR, and agree it with the workstream on th
 A session moves through the stages `decide`, `prep`, `cook`, `present` and `feedback`, in any order. Its `turns` are the transcript:
 
 - `cook`: what the cook said (`text`, from on-device speech to text)
-- `sous`: Sou's reply, with speech-ready `text`, `tool_calls`, or both
+- `sous`: Sous's reply, with speech-ready `text`, `tool_calls`, or both
 - `tool`: `tool_results` for the sous turn just before it
 
-For Claude, `cook` and `tool` turns become user messages and `sous` turns become assistant messages. `facts` collects everything Sou saved with `note`; `rating` (1 to 5) and `notes` come from `/end`.
+For Claude, `cook` and `tool` turns become user messages and `sous` turns become assistant messages. `facts` collects everything Sous saved with `note`; `rating` (1 to 5) and `notes` come from `/end`.
 
 ### POST /sessions/:id/turns
 
-The body is a `TurnRequest`: `text`, `tool_results`, or both. When a reply ends with `stop_reason: "tool_use"`, the next request must carry a result for every client tool call in that reply, all together.
+The body is a `TurnRequest`: any of `text`, `tool_results` and `events`, at least one. When a reply ends with `stop_reason: "tool_use"`, the next request must carry a result for every client tool call in that reply, all together. `events` reports what happened on the phone that needs the chef (see "Kitchen protocol" below).
 
 The response is a server-sent event stream. Each event's name is its `type` and its data is a `StreamEvent`:
 
 | type | data | meaning |
 | --- | --- | --- |
-| `text` | `delta` | the next chunk of Sou's reply |
+| `text` | `delta` | the next chunk of Sous's reply |
 | `tool_call` | `tool_call` | a client tool for the app to run |
-| `done` | `stop_reason`: `end_turn` or `tool_use` | the reply is finished; `tool_use` means results are owed |
+| `done` | `stop_reason`: `end_turn` or `tool_use`, and optionally `awaiting_ack: {short}` | the reply is finished; `tool_use` means results are owed; `awaiting_ack` means the reply ended with an instruction waiting for "Heard" |
 | `error` | `message` | the turn failed and the stream ends |
 
 ## Tools
@@ -51,8 +51,32 @@ The response is a server-sent event stream. Each event's name is its `type` and 
 | `set_stage` | phone | `stage` | anything |
 | `show` | phone | `view`: `step`, `ingredients` or `done_cue` | anything |
 | `note` | brain | `fact` | anything, e.g. `saved` |
+| `await_ack` | brain | `short` | `Waiting for the chef.` |
 
-To Claude these are all ordinary custom tools. The brain runs `note` itself and never streams it to the app; the other five reach the app as `tool_call` events. Errors go back with `is_error: true`.
+To Claude these are all ordinary custom tools. The brain runs `note` and `await_ack` itself and never streams them to the app; the other five reach the app as `tool_call` events. Errors go back with `is_error: true`. `await_ack` never appears in a session's `turns`, so transcripts only hold the tools above it.
+
+## Kitchen protocol
+
+Sous follows the voice protocol in the "Decided" section of the root `AGENTS.md`: every instruction gets an acknowledgement, and Sous never speaks first. Two shapes carry it between the brain and the app.
+
+**Awaiting "Heard".** When Sous ends a reply with an instruction or an offer, it calls `await_ack` with a short form, and the brain reports it on the `done` event that ends the exchange:
+
+```json
+{ "type": "done", "stop_reason": "end_turn", "awaiting_ack": { "short": "Chef, rice, twelve minutes. Heard?" } }
+```
+
+- It only ever comes with `end_turn`. On `tool_use`, run the tools and send the results as usual; the `done` that ends that follow-up reply carries it.
+- No `awaiting_ack` on the final `done` means nothing is waiting: don't repeat anything.
+- With it, the app speaks the reply as streamed, then repeats `short` like an alarm clock (about ten seconds, thirty, then every minute) until the chef opens a turn. Whatever the chef says next goes to the brain as `text`, as always: the brain treats "Heard", "Yes, Chef" and the like as closing the instruction, and "Yep, but make it ten" as a new one. There's nothing to send for an acknowledgement beyond the text.
+- A bare acknowledgement usually gets no reply at all: the stream is just `done`. Speak nothing and go back to waiting.
+
+**The red flame.** When something on the phone needs the chef, such as a timer finishing, the app turns the flame red and chimes. When the chef opens the next turn ("Hey Sous" or a tap), send what happened as `events`, with anything the chef said as `text`:
+
+```json
+{ "events": [{ "type": "timer_finished", "timer_id": "timer-1", "label": "rice" }] }
+```
+
+`timer_id` is the id the phone returned from `start_timer` and `label` the label Sous gave it. Send every event since the chef's last turn (up to ten), together with any tool results still owed. Sous then says what it needs, usually with an `awaiting_ack`. Events are not saved in the session's `turns`.
 
 ## Using it
 

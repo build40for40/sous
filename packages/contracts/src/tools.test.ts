@@ -13,6 +13,7 @@ const callDefs: Record<string, string> = {
   set_stage: "SetStageCall",
   show: "ShowCall",
   note: "NoteCall",
+  await_ack: "AwaitAckCall",
 };
 
 const unsupportedInStrictMode = ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength"];
@@ -54,6 +55,17 @@ describe("tool definitions", () => {
   it("offers set_stage every stage", () => {
     const setStage = tools.find((t) => t.name === "set_stage")!;
     expect((setStage.input_schema.properties.stage as { enum: string[] }).enum).toEqual([...stages]);
+  });
+
+  it("runs note and await_ack in the brain and everything else on the phone", () => {
+    expect([...serverToolNames]).toEqual(["note", "await_ack"]);
+    expect([...clientToolNames]).not.toContain("await_ack");
+  });
+
+  it("asks for a short form of the instruction in await_ack", () => {
+    const awaitAck = tools.find((t) => t.name === "await_ack")!;
+    expect(awaitAck.input_schema.required).toEqual(["short"]);
+    expect((awaitAck.input_schema.properties.short as { description: string }).description).toContain("Chef, rice, twelve minutes. Heard?");
   });
 
   it("accepts every tool call in the example session", () => {

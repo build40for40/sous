@@ -78,6 +78,59 @@ describe("runTurn", () => {
     expect((await outcome).stage).toBe("present");
   });
 
+  it("ends the turn on await_ack without asking Claude again, holding its result and keeping it out of the transcript", async () => {
+    const { claude, events, outcome } = run({
+      content: [
+        { type: "text", text: "Chef, rice in the pan." },
+        { type: "tool_use", id: "ack1", name: "await_ack", input: { short: "Chef, rice in. Heard?" } },
+      ],
+    });
+    const result = await outcome;
+    expect(claude.requests).toHaveLength(1);
+    expect(events.some((e) => e.type === "tool_call")).toBe(false);
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.messages.at(-1)).toEqual({ role: "user", content: [{ type: "tool_result", tool_use_id: "ack1", content: "Waiting for the chef." }] });
+    expect(result.turns).toEqual([{ role: "sous", at: "2026-11-06T18:00:00Z", text: "Chef, rice in the pan." }]);
+  });
+
+  it("hands client tools to the phone alongside await_ack", async () => {
+    const { claude, events, outcome } = run({
+      content: [
+        { type: "text", text: "Timer's on, Chef." },
+        { type: "tool_use", id: "timer1", name: "start_timer", input: { label: "rice", seconds: 720 } },
+        { type: "tool_use", id: "ack2", name: "await_ack", input: { short: "Chef, rice timer. Heard?" } },
+      ],
+    });
+    const result = await outcome;
+    expect(claude.requests).toHaveLength(1);
+    expect(events.filter((e) => e.type === "tool_call")).toHaveLength(1);
+    expect(result.stopReason).toBe("tool_use");
+    expect(result.turns.map((t) => t.role)).toEqual(["sous"]);
+  });
+
+  it("asks Claude again when await_ack comes with a broken call", async () => {
+    const { claude, outcome } = run(
+      {
+        content: [
+          { type: "tool_use", id: "bad", name: "go_to_step", input: { index: 9 } },
+          { type: "tool_use", id: "ack3", name: "await_ack", input: { short: "Chef, step ten. Heard?" } },
+        ],
+      },
+      { content: [{ type: "text", text: "My mistake, Chef." }] },
+    );
+    await outcome;
+    expect(claude.requests).toHaveLength(2);
+  });
+
+  it("keeps a silent reply out of the history, so the API never sees an empty assistant message", async () => {
+    const { events, outcome } = run({ content: [] });
+    const result = await outcome;
+    expect(events).toEqual([]);
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Go on then." }] }]);
+    expect(result.turns).toEqual([]);
+  });
+
   it("gives up if Claude keeps calling server tools", async () => {
     const notes = Array.from({ length: MAX_ROUNDS }, () => ({ content: [{ type: "tool_use" as const, name: "note", input: { fact: "Again" } }] }));
     const { outcome } = run(...notes);

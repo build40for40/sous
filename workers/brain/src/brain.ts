@@ -12,7 +12,7 @@ import { isRetryable, reflect, type EndRequest, type Rating, type Reflection } f
 import { migrate } from "./schema";
 import { demoRecipe, starterAbout, starterPreferences } from "./seed";
 import { suggest, SUGGEST_MODEL, type Suggestion } from "./suggest";
-import { appendTurnRequest, requestTurns, sse, type NewSession, type SessionRow } from "./sessions";
+import { appendTurnRequest, awaitingAck, requestTurns, sse, type NewSession, type SessionRow } from "./sessions";
 import { runTurn, type TurnOutcome } from "./turn";
 import { deleteRecipeCascade, replaceAbout, splitLearned, writeReflection } from "./vault";
 
@@ -23,7 +23,7 @@ interface NoteRow extends Record<string, SqlStorageValue> {
 }
 
 const SSE_HEADERS = { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform" };
-const TURN_FAILED = "Sou lost the thread there. Try that again.";
+const TURN_FAILED = "Sous lost the thread there. Try that again.";
 const REFLECTION_DELAY_MS = 5_000;
 const REFLECTION_TIMEOUT_MS = 10 * 60_000;
 
@@ -152,7 +152,7 @@ export class UserBrain extends DurableObject<Env> {
     return session;
   }
 
-  /** Streams Sou's reply to one turn as server-sent events, saving the session once the reply is complete. */
+  /** Streams Sous's reply to one turn as server-sent events, saving the session once the reply is complete. */
   takeTurn(sessionId: string, request: TurnRequest): Response {
     this.init();
     const row = this.getSessionRow(sessionId);
@@ -188,7 +188,8 @@ export class UserBrain extends DurableObject<Env> {
           emit,
         });
         this.saveTurn(sessionId, [...requestTurns(request, at), ...outcome.turns], outcome);
-        emit({ type: "done", stop_reason: outcome.stopReason });
+        const ack = outcome.stopReason === "end_turn" ? awaitingAck(outcome.messages) : null;
+        emit({ type: "done", stop_reason: outcome.stopReason, ...(ack ? { awaiting_ack: ack } : {}) });
         console.log(JSON.stringify({ event: "sous_turn", model, stop_reason: outcome.stopReason, ...outcome.timings, usage: outcome.usage }));
       } catch (e) {
         console.error(JSON.stringify({ event: "sous_turn_failed", model, error: String(e) }));

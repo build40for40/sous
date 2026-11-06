@@ -224,7 +224,7 @@ function preferenceText(line: string): string {
 const hasLearned = (body: string) => body.split("\n").includes(`## ${LEARNED}`);
 const withoutLearned = (body: string) => (hasLearned(body) ? editSection(body, LEARNED, () => []) : body);
 
-/** Splits USER.md's body into the cook's free text and the entries Sou learned, without bullets or session links. */
+/** Splits USER.md's body into the cook's free text and the entries Sous learned, without bullets or session links. */
 export function splitLearned(body: string): { about: string; learned: string[] } {
   return { about: withoutLearned(body), learned: sectionLines(body, LEARNED).map(entryText) };
 }

@@ -59,6 +59,7 @@ describe("session schema", () => {
     ["a sous turn with neither text nor tool calls", (s) => (s.turns[1] = { role: "sous", at: s.turns[1].at })],
     ["a tool turn without results", (s) => (s.turns[2].tool_results = [])],
     ["a call to an unknown tool", (s) => (s.turns[1].tool_calls[0].name = "order_pizza")],
+    ["an await_ack call with an empty short form", (s) => (s.turns[7].tool_calls[0] = { id: "toolu_fake_20", name: "await_ack", input: { short: "" } })],
     ["a timer of zero seconds", (s) => (s.turns[4].tool_calls[2].input.seconds = 0)],
     ["a negative step index", (s) => (s.turns[4].tool_calls[1].input.index = -1)],
     ["set_stage to an unknown stage", (s) => (s.turns[1].tool_calls[0].input.stage = "nap")],
@@ -83,6 +84,11 @@ describe("turn request", () => {
         tool_results: [{ tool_call_id: "toolu_fake_05", content: "timer-2", is_error: false }],
       },
     ],
+    ["a finished timer on its own, when the chef only tapped the flame", { events: [{ type: "timer_finished", timer_id: "timer-1", label: "rice" }] }],
+    [
+      "a finished timer with what the chef said",
+      { text: "What's up?", events: [{ type: "timer_finished", timer_id: "timer-1", label: "rice" }, { type: "timer_finished", timer_id: "timer-2", label: "dahl" }] },
+    ],
   ])("accepts %s", (_, body) => {
     expect(validateTurnRequest(body), JSON.stringify(validateTurnRequest.errors)).toBe(true);
   });
@@ -92,6 +98,12 @@ describe("turn request", () => {
     ["empty text", { text: "" }],
     ["an empty results list", { tool_results: [] }],
     ["a user id", { text: "hi", user_id: "someone-else" }],
+    ["an empty events list", { events: [] }],
+    ["an unknown phone event", { events: [{ type: "oven_preheated" }] }],
+    ["a finished timer without its label", { events: [{ type: "timer_finished", timer_id: "timer-1" }] }],
+    ["a finished timer with an empty id", { events: [{ type: "timer_finished", timer_id: "", label: "rice" }] }],
+    ["a finished timer with an extra field", { events: [{ type: "timer_finished", timer_id: "timer-1", label: "rice", seconds: 600 }] }],
+    ["more than ten events", { events: Array.from({ length: 11 }, (_, i) => ({ type: "timer_finished", timer_id: `timer-${i}`, label: "rice" })) }],
   ])("rejects %s", (_, body) => {
     expect(validateTurnRequest(body)).toBe(false);
   });
@@ -105,7 +117,8 @@ describe("stream events", () => {
     { type: "tool_call", tool_call: { id: "toolu_fake_11", name: "show", input: { view: "done_cue" } } },
     { type: "done", stop_reason: "tool_use" },
     { type: "done", stop_reason: "end_turn" },
-    { type: "error", message: "Sou lost the thread. Try again." },
+    { type: "done", stop_reason: "end_turn", awaiting_ack: { short: "Chef, rice, twelve minutes. Heard?" } },
+    { type: "error", message: "Sous lost the thread. Try again." },
   ];
 
   it.each(events.map((event) => [event.type, event] as const))("accepts a %s event", (_, event) => {
@@ -117,6 +130,10 @@ describe("stream events", () => {
     ["a text event without a delta", { type: "text" }],
     ["a note call, which the brain runs itself", { type: "tool_call", tool_call: { id: "toolu_fake_12", name: "note", input: { fact: "Hates coriander" } } }],
     ["an unknown stop reason", { type: "done", stop_reason: "max_tokens" }],
+    ["awaiting_ack without a short form", { type: "done", stop_reason: "end_turn", awaiting_ack: {} }],
+    ["awaiting_ack with an empty short form", { type: "done", stop_reason: "end_turn", awaiting_ack: { short: "" } }],
+    ["awaiting_ack as a bare string", { type: "done", stop_reason: "end_turn", awaiting_ack: "Chef, rice. Heard?" }],
+    ["an await_ack call, which the brain runs itself", { type: "tool_call", tool_call: { id: "toolu_fake_13", name: "await_ack", input: { short: "Chef, rice. Heard?" } } }],
     ["an error without a message", { type: "error" }],
   ])("rejects %s", (_, event) => {
     expect(validateStreamEvent(event)).toBe(false);

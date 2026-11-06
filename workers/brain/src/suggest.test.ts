@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient } from "./claude";
 import { buildDigest, type CookRecord } from "./digest";
-import { MAX_SUGGESTIONS, suggest, SuggestError, suggestRequest, suggestSchema } from "./suggest";
+import { MAX_SUGGESTIONS, suggest, SUGGEST_PROMPT, SuggestError, suggestRequest, suggestSchema } from "./suggest";
 import { mockClaude } from "./testing";
 
 afterEach(() => {
@@ -39,6 +39,13 @@ describe("suggestRequest", () => {
     expect(content).not.toContain("id=bad");
   });
 
+  it("speaks as Sous and keeps reasons speech-ready for a picker read aloud", () => {
+    expect(SUGGEST_PROMPT).toMatch(/^You are Sous,/);
+    expect(SUGGEST_PROMPT).not.toMatch(/\bSou\b/);
+    expect(SUGGEST_PROMPT).toMatch(/numbered list the cook chooses from by voice/);
+    expect(SUGGEST_PROMPT).toMatch(/numbers as words, with no digits/);
+  });
+
   it("keeps the schema to what structured outputs support", () => {
     expect(JSON.stringify(suggestSchema)).not.toMatch(/minimum|maximum|minLength|maxLength|minItems|maxItems/);
   });
@@ -53,8 +60,8 @@ describe("suggest", () => {
     const { suggestions } = await suggest(client(), digest());
     expect(claude.requests[0]).toMatchObject({ model: "claude-sonnet-5-5", stream: true });
     expect(suggestions).toEqual([
-      { recipe_id: "loved", title: "Fake Miso Salmon", reason: "You gave this five stars." },
-      { recipe_id: "new", title: "Fake Pancakes", reason: "Something new." },
+      { number: 1, recipe_id: "loved", title: "Fake Miso Salmon", reason: "You gave this five stars." },
+      { number: 2, recipe_id: "new", title: "Fake Pancakes", reason: "Something new." },
     ]);
   });
 
@@ -68,6 +75,20 @@ describe("suggest", () => {
     ]));
     const { suggestions } = await suggest(client(), digest());
     expect(suggestions.map((s) => s.recipe_id)).toEqual(["loved"]);
+  });
+
+  it("numbers the picker from one without gaps, so the chef can say \"number two\"", async () => {
+    mockClaude(reply([
+      { recipe_id: "invented", reason: "Trust me." },
+      { recipe_id: "new", reason: "Something new." },
+      { recipe_id: "bad", reason: "Spicy!" },
+      { recipe_id: "loved", reason: "Back again." },
+    ]));
+    const { suggestions } = await suggest(client(), digest());
+    expect(suggestions.map(({ number, recipe_id }) => [number, recipe_id])).toEqual([
+      [1, "new"],
+      [2, "loved"],
+    ]);
   });
 
   it("drops a badly rated recipe, then offers it again once the cook rates it well", async () => {

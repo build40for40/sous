@@ -9,7 +9,7 @@ export const starterPreferences: Preferences = {
 
 export const starterAbout = `# About me
 
-Sou fills this in as we cook together: what you love, what you won't touch, and how many pans you actually own.
+Sous fills this in as we cook together: what you love, what you won't touch, and how many pans you actually own.
 `;
 
 export const demoRecipe: NewRecipe = {
