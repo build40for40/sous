@@ -2,6 +2,37 @@
 
 Decided on Friday 6 November 2026 (Day 5). This is the plan for the extraction side of Sous: how a recipe someone sees on Instagram ends up as a written recipe in their Sous library. The evidence behind it is in [extraction-test-set.md](extraction-test-set.md) and [LOG.md](../LOG.md).
 
+## MVP (built in `workers/extract`)
+
+People share a post into Sous with the share button. Sous reads **only the caption** (one request to Instagram's public embed page, identifying itself as Sous) and **the creator's recipe page** if the caption links one. Claude Opus 5.5 writes the contract recipe and it's saved into the user's brain, so it shows in `GET /recipes`. When the recipe isn't in the caption, Sous asks for a screenshot. No video, audio or comments are ever downloaded. API and details: [workers/extract/README.md](../workers/extract/README.md).
+
+**Decision on Instagram's terms (Samira, 6 Nov):**
+- **Accepted for the MVP:** reading the public caption and the creator's own recipe page, one request per share.
+- **Not accepted without Ben:** downloading video or audio.
+- **Still to do:** `AGENTS.md` still says "check with the team before building on it". Ben should confirm and update it.
+
+**In and out, measured on the 33 real posts in the simulation:**
+
+| | What | Posts |
+|---|---|---|
+| ✅ Automatic | Full recipe written in the caption | 13 |
+| ✅ Automatic | Caption links the creator's recipe page | 5 |
+| ✅ Automatic | A recipe website shared directly | — |
+| 🟡 One extra step | Recipe in the comments → screenshot the comment | 1 |
+| 🟡 One extra step | "Comment KEYWORD for the recipe" → screenshot the DM | 1 |
+| 🟡 One extra step | "Recipe at the link in bio" → share that page | 2 |
+| 🟡 One extra step | Private or deleted post, or recipe-card carousel → screenshot | — |
+| ❌ Out | Recipe only spoken in the video | 5 |
+| ❌ Out | Recipe only shown in the video | 1 |
+| ⚪ Not a recipe | Showpieces, a description-only photo | 4 |
+| ⚪ Skipped | Meal-prep plans | 1 |
+
+That's **18 of 24 real recipes automatically (75%)**, and up to 22 of 24 with a screenshot or shared page. Also out for now: TikTok and YouTube links, and the DM to @sous path.
+
+**For comparison:** ReciMe, the best-known app here, also imports from the caption through the share button. Reviewers say it "often struggles" when the recipe is only in the video.
+
+**Not verified yet:** whether Instagram answers Cloudflare's servers the way it answers the build Mac. Check the first `sous_extract` logs after deploy.
+
 ## The three stages
 
 1. **Saved items → a list of posts.** Who saved what.
