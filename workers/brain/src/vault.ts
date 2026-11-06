@@ -3,7 +3,7 @@ import type { JsonValue } from "./profile";
 import { USER_MD } from "./profile";
 import { recipeNotePath } from "./prompt";
 import type { Reflection } from "./reflection";
-import { slugify } from "./recipes";
+import { slugify, type RecipeRow } from "./recipes";
 import { linkKind, parseWikilinks, wikilink } from "./wikilinks";
 
 export type NoteKind = "user" | "memory" | "recipe" | "session" | "ingredient" | "technique" | "cuisine";
@@ -31,11 +31,12 @@ interface Topic {
 
 const TOPIC_FOLDERS = { ingredient: "ingredients", technique: "techniques", cuisine: "cuisines" } as const;
 const LEARNED = "Learned while cooking";
+const COOKED_IN = "Cooked in";
 
 export const londonDate = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(new Date(iso));
 export const londonDay = (iso: string) => new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", day: "numeric", month: "long", year: "numeric" }).format(new Date(iso));
 
-export function sessionNotePath(session: Pick<ReflectedSession, "id" | "started_at" | "recipe">): string {
+export function sessionNotePath(session: Pick<ReflectedSession, "id" | "started_at"> & { recipe: { slug?: string } | null }): string {
   return `sessions/${londonDate(session.started_at)}-${session.recipe?.slug ?? "cook"}-${session.id.slice(0, 8)}.md`;
 }
 
@@ -99,7 +100,7 @@ export function writeReflection(sql: SqlStorage, session: ReflectedSession, now:
   for (const [kind, list] of Object.entries(topics) as [keyof typeof TOPIC_FOLDERS, Topic[]][]) {
     for (const topic of list) {
       const existing = readFile(sql, topic.path);
-      const body = editSection(existing?.body ?? `# ${topic.name}\n`, "Cooked in", replaceSessionLines(sessionLink, [usedIn]));
+      const body = editSection(existing?.body ?? `# ${topic.name}\n`, COOKED_IN, replaceSessionLines(sessionLink, [usedIn]));
       writeFile(sql, topic.path, kind, { ...existing?.frontmatter, name: (existing?.frontmatter.name as string) ?? topic.name }, body, now);
     }
   }
@@ -117,6 +118,35 @@ export function writeReflection(sql: SqlStorage, session: ReflectedSession, now:
 
   rebuildLinks(sql);
   return sessionPath;
+}
+
+/** Removes a recipe and everything that only exists because of it: its sessions, their notes, and the per-cook lines they left in topic notes (dropping topic notes left with no cooks). USER.md keeps what was learned, minus the links to the deleted session notes. */
+export function deleteRecipeCascade(sql: SqlStorage, recipe: Pick<RecipeRow, "id" | "slug">): void {
+  const sessions = sql.exec<{ id: string; started_at: string; reflection: string | null }>("SELECT id, started_at, reflection FROM sessions WHERE recipe_id = ?", recipe.id).toArray();
+  const sessionPaths = sessions.flatMap((s) => {
+    const saved = s.reflection ? (JSON.parse(s.reflection) as { note?: string }).note : undefined;
+    return [sessionNotePath({ id: s.id, started_at: s.started_at, recipe }), ...(saved ? [saved] : [])];
+  });
+  const links = sessionPaths.map((path) => wikilink(path));
+
+  const topics = sql.exec<FileRow>("SELECT path, frontmatter, body FROM files WHERE kind IN ('ingredient', 'technique', 'cuisine') ORDER BY path").toArray();
+  for (const topic of topics) {
+    const kept = sectionLines(topic.body, COOKED_IN).filter((l) => !links.some((link) => l.includes(link)));
+    if (kept.length === sectionLines(topic.body, COOKED_IN).length) continue;
+    if (kept.length) sql.exec("UPDATE files SET body = ? WHERE path = ?", editSection(topic.body, COOKED_IN, () => kept), topic.path);
+    else sql.exec("DELETE FROM files WHERE path = ?", topic.path);
+  }
+
+  const user = readFile(sql, USER_MD);
+  if (user) {
+    const body = editSection(user.body, LEARNED, (current) => current.map((l) => links.reduce((line, link) => line.replace(` (${link})`, ""), l)));
+    sql.exec("UPDATE files SET body = ? WHERE path = ?", body, USER_MD);
+  }
+
+  for (const path of [...sessionPaths, recipeNotePath(recipe.slug)]) sql.exec("DELETE FROM files WHERE path = ?", path);
+  sql.exec("DELETE FROM sessions WHERE recipe_id = ?", recipe.id);
+  sql.exec("DELETE FROM recipes WHERE id = ?", recipe.id);
+  rebuildLinks(sql);
 }
 
 /** Throws away the links table and reads it back from every note's [[wikilinks]]. */

@@ -3,7 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { UserBrain } from "./brain";
 import type { Reflection } from "./reflection";
-import { addLines, editSection, londonDate, londonDay, rebuildLinks, replaceSessionLines, sessionNotePath, writeReflection, type ReflectedSession } from "./vault";
+import { addLines, deleteRecipeCascade, editSection, londonDate, londonDay, rebuildLinks, replaceSessionLines, sessionNotePath, writeReflection, type ReflectedSession } from "./vault";
 
 const recipe = { id: "recipe-1", slug: "fake-toastie", title: "Fake Toastie", source_url: "https://example.com/sous/fake-toastie" };
 
@@ -28,12 +28,14 @@ const session = (overrides: Partial<ReflectedSession> = {}): ReflectedSession =>
   ...overrides,
 });
 
-async function inVault<T>(name: string, run: (sql: SqlStorage) => T): Promise<T> {
+async function inVaultWithBrain<T>(name: string, run: (sql: SqlStorage, brain: UserBrain) => T): Promise<T> {
   return runInDurableObject(env.USER_BRAIN.get(env.USER_BRAIN.idFromName(name)), (brain: UserBrain, state) => {
     brain.getProfile();
-    return run(state.storage.sql);
+    return run(state.storage.sql, brain);
   });
 }
+
+const inVault = <T>(name: string, run: (sql: SqlStorage) => T) => inVaultWithBrain(name, (sql) => run(sql));
 
 const files = (sql: SqlStorage) => sql.exec<{ path: string; kind: string; frontmatter: string; body: string; updated_at: string }>("SELECT * FROM files ORDER BY path").toArray();
 const links = (sql: SqlStorage) => sql.exec<{ src: string; dst: string; kind: string }>("SELECT * FROM links ORDER BY src, dst").toArray();
@@ -224,6 +226,53 @@ describe("rebuildLinks", () => {
       ]);
       rebuildLinks(sql);
       expect(links(sql)).toHaveLength(2);
+    });
+  });
+});
+
+describe("deleteRecipeCascade", () => {
+  const cook = (sql: SqlStorage, recipe: { id?: string; slug?: string; title: string }, id: string, day: string, ingredients: string[], preferences: string[], ended = true) => {
+    const startedAt = `2026-11-${day}T18:00:00Z`;
+    sql.exec("INSERT INTO sessions (id, recipe_id, started_at, ended_at) VALUES (?, ?, ?, ?)", id, recipe.id, startedAt, ended ? startedAt : null);
+    if (!ended) return null;
+    const note = writeReflection(sql, { id, started_at: startedAt, recipe: recipe as ReflectedSession["recipe"], notes: null, reflection: { ...reflection, ingredients, preferences } }, startedAt);
+    sql.exec("UPDATE sessions SET reflected_at = ?, reflection = ? WHERE id = ?", startedAt, JSON.stringify({ ...reflection, note }), id);
+    return note;
+  };
+  const paths = (sql: SqlStorage) => files(sql).map((f) => f.path);
+
+  it("removes the recipe, its sessions, their notes and their cook lines, keeping what others still use", async () => {
+    await inVaultWithBrain("vault_cascade", (sql, brain) => {
+      const toastie = brain.createRecipe({ title: "Fake Toastie", ingredients: [{ name: "bread" }], steps: [{ text: "Toast." }] });
+      const melt = brain.createRecipe({ title: "Fake Melt", ingredients: [{ name: "bread" }], steps: [{ text: "Melt." }] });
+      const kept = cook(sql, melt, "bbbbbbbb-2222", "02", ["bread", "ham"], ["Likes ham"])!;
+      cook(sql, toastie, "aaaaaaaa-1111", "01", ["bread", "red leicester"], ["Hates coriander"]);
+      cook(sql, toastie, "cccccccc-3333", "03", ["bread", "butter"], ["Likes butter"]);
+      cook(sql, toastie, "dddddddd-4444", "04", [], [], false);
+      const userBefore = body(sql, "USER.md");
+      expect(userBefore).toContain("Hates coriander");
+
+      deleteRecipeCascade(sql, { id: toastie.id!, slug: toastie.slug! });
+
+      expect(sql.exec("SELECT id FROM recipes WHERE id = ?", toastie.id).toArray()).toEqual([]);
+      expect(sql.exec("SELECT id FROM sessions").toArray()).toEqual([{ id: "bbbbbbbb-2222" }]);
+      expect(paths(sql)).toEqual(["USER.md", "cuisines/british.md", "ingredients/bread.md", "ingredients/ham.md", `recipes/${melt.slug}.md`, kept, "techniques/toasting.md"].sort());
+      expect(body(sql, "ingredients/bread.md")).toBe(`# bread\n\n## Cooked in\n\n- [[${kept.replace(/\.md$/, "")}]] in [[recipes/${melt.slug}|Fake Melt]], 2 November 2026, 4/5\n`);
+      expect(body(sql, "cuisines/british.md")).not.toContain("aaaaaaaa");
+      expect(links(sql).filter((l) => l.src.includes("aaaaaaaa") || l.dst.includes("aaaaaaaa") || l.dst.includes("fake-toastie"))).toEqual([]);
+      expect(links(sql)).toContainEqual({ src: kept, dst: "ingredients/ham.md", kind: "ingredient" });
+      const user = body(sql, "USER.md");
+      expect(user).toContain("- Hates coriander\n");
+      expect(user).toContain("- Likes butter\n");
+      expect(user).toContain("- Likes ham ([[sessions/2026-11-02-fake-melt-bbbbbbbb]])");
+    });
+  });
+
+  it("deletes a recipe that was never cooked", async () => {
+    await inVaultWithBrain("vault_cascade_plain", (sql, brain) => {
+      const recipe = brain.createRecipe({ title: "Fake Plain", ingredients: [{ name: "salt" }], steps: [{ text: "Season." }] });
+      deleteRecipeCascade(sql, { id: recipe.id!, slug: recipe.slug! });
+      expect(sql.exec("SELECT 1 FROM recipes WHERE id = ?", recipe.id).toArray()).toEqual([]);
     });
   });
 });
