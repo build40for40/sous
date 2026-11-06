@@ -313,3 +313,102 @@ async function sha256Base64(data: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+describe("review fixes: failures are never cached (#195)", () => {
+  it("reads a post again for the next person after it looked private", async () => {
+    web.pages.set(embedUrl(S("Flaky01")), "<html><body>Log in to see this</body></html>");
+    const first = await share(`https://www.instagram.com/p/${S("Flaky01")}/`);
+    await runPost(`ig:${S("Flaky01")}`);
+    expect(await getShare(first.body.id)).toMatchObject({ status: "needs_screenshot" });
+
+    web.pages.set(embedUrl(S("Flaky01")), embedPage("feelgoodfoodie", COOKIES));
+    web.claude.push(claudeRecipe());
+    const second = await share(`https://www.instagram.com/p/${S("Flaky01")}/`, BOB);
+    expect(second.body.status).toBe("reading");
+    await runPost(`ig:${S("Flaky01")}`);
+    expect(await getShare(second.body.id, BOB)).toMatchObject({ status: "saved" });
+  });
+
+  it("gives up after five attempts, then the same person sharing again tries afresh", async () => {
+    web.pages.set(embedUrl(S("Down01")), 429);
+    const { body } = await share(`https://www.instagram.com/reel/${S("Down01")}/`);
+    for (let i = 0; i < 5; i++) await runPost(`ig:${S("Down01")}`);
+    expect(await getShare(body.id)).toMatchObject({ status: "needs_screenshot", reason: "Sous couldn't read this right now. Share it again later, or share a screenshot of the recipe." });
+
+    web.pages.set(embedUrl(S("Down01")), embedPage("feelgoodfoodie", COOKIES));
+    web.claude.push(claudeRecipe());
+    const again = await share(`https://www.instagram.com/reel/${S("Down01")}/`);
+    expect(again.status).toBe(202);
+    expect(again.body).toMatchObject({ id: body.id, status: "reading" });
+    await runPost(`ig:${S("Down01")}`);
+    expect(await getShare(body.id)).toMatchObject({ status: "saved" });
+  });
+
+  it("doesn't cache an answer made without a recipe page that wouldn't open", async () => {
+    web.pages.set(embedUrl(S("Page01")), embedPage("feelgoodfoodie", `Recipe https://flaky.example/r-${n}`));
+    web.pages.set(`https://flaky.example/r-${n}`, 503);
+    web.claude.push(claudeOutcome("needs_screenshot", "The recipe is on a page Sous couldn't open."));
+    await share(`https://www.instagram.com/reel/${S("Page01")}/`);
+    await runPost(`ig:${S("Page01")}`);
+
+    web.pages.set(`https://flaky.example/r-${n}`, recipePage("Onions", ["4 onions"], ["Stuff them."]));
+    web.claude.push(claudeRecipe({ source_used: "recipe_page" }));
+    const bob = await share(`https://www.instagram.com/reel/${S("Page01")}/`, BOB);
+    expect(bob.body.status).toBe("reading");
+    await runPost(`ig:${S("Page01")}`);
+    expect(await getShare(bob.body.id, BOB)).toMatchObject({ status: "saved", source_used: "recipe_page" });
+  });
+
+  it("still caches Claude's answer when every source was read", async () => {
+    web.pages.set(embedUrl(S("Show01")), embedPage("amauryguichon", "Blueberries!"));
+    web.claude.push(claudeOutcome("no_recipe", "A showpiece."));
+    await share(`https://www.instagram.com/reel/${S("Show01")}/`);
+    await runPost(`ig:${S("Show01")}`);
+    const bob = await share(`https://www.instagram.com/reel/${S("Show01")}/`, BOB);
+    expect(bob.body.status).toBe("no_recipe");
+    expect(web.claudeRequests).toHaveLength(1);
+  });
+});
+
+describe("review fixes: screenshot rescue only when needed (#196)", () => {
+  it("refuses a screenshot for a share that's already saved, without a second recipe", async () => {
+    web.pages.set(embedUrl(S("Saved1")), embedPage("feelgoodfoodie", COOKIES));
+    web.claude.push(claudeRecipe());
+    const { body } = await share(`https://www.instagram.com/reel/${S("Saved1")}/`);
+    await runPost(`ig:${S("Saved1")}`);
+    const response = await call(`/${body.id}/screenshot`, { method: "POST", body: { image: { media_type: "image/png", data: PNG } } });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "screenshot_not_needed" });
+    expect(await brainRecipes(ALICE)).toHaveLength(1);
+    expect(web.claudeRequests).toHaveLength(1);
+  });
+
+  it("counts screenshots toward the daily limit", async () => {
+    (env as { SOUS_DAILY_SHARE_LIMIT: string }).SOUS_DAILY_SHARE_LIMIT = "2";
+    try {
+      web.pages.set(embedUrl(S("Cmnts1")), embedPage("kierans__kitchen", "Recipe in comments"));
+      web.claude.push(claudeOutcome("needs_screenshot", "The recipe is in the comments."), claudeOutcome("needs_screenshot", "That screenshot has no recipe."));
+      const { body } = await share(`https://www.instagram.com/p/${S("Cmnts1")}/`); // read 1
+      await runPost(`ig:${S("Cmnts1")}`);
+      const shot = await call(`/${body.id}/screenshot`, { method: "POST", body: { image: { media_type: "image/png", data: PNG } } }); // read 2
+      expect(shot.status).toBe(202);
+      await runPost(`img:${await sha256Base64(PNG)}`);
+      expect(await getShare(body.id)).toMatchObject({ status: "needs_screenshot" });
+      const third = await call(`/${body.id}/screenshot`, { method: "POST", body: { image: { media_type: "image/png", data: BASE_PNG } } });
+      expect(third.status).toBe(429);
+    } finally {
+      (env as { SOUS_DAILY_SHARE_LIMIT: string }).SOUS_DAILY_SHARE_LIMIT = "50";
+    }
+  });
+});
+
+describe("review fixes: account deletion (#197)", () => {
+  it("DELETE /shares forgets every share for that user only", async () => {
+    web.pages.set(embedUrl(S("Wipe01")), embedPage("feelgoodfoodie", COOKIES));
+    await share(`https://www.instagram.com/reel/${S("Wipe01")}/`);
+    await share(`https://www.instagram.com/reel/${S("Wipe01")}/`, BOB);
+    expect((await call("", { method: "DELETE" })).status).toBe(204);
+    expect(((await (await call("")).json()) as { shares: Share[] }).shares).toEqual([]);
+    expect(((await (await call("", { user: BOB })).json()) as { shares: Share[] }).shares).toHaveLength(1);
+  });
+});
