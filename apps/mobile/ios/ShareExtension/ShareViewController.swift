@@ -109,14 +109,23 @@ final class ShareViewController: UIViewController {
   }
 
   /// Opens Sous through the responder chain, the way receive_sharing_intent's
-  /// own extension does. UIApplication.open is marked unavailable to
-  /// extensions, so this target builds with APPLICATION_EXTENSION_API_ONLY = NO.
+  /// own extension does. Extensions must build extension-safe
+  /// (APPLICATION_EXTENSION_API_ONLY = YES, which Flutter checks), where
+  /// UIApplication.open isn't available to call directly, so it's called
+  /// through the Objective-C runtime.
   private func openHostApp() {
     guard let url = URL(string: "ShareMedia-\(hostBundleId):share") else { return }
     var responder: UIResponder? = self
     while let current = responder {
-      if let application = current as? UIApplication {
-        application.open(url, options: [:], completionHandler: nil)
+      if current is UIApplication {
+        let selector = NSSelectorFromString("openURL:options:completionHandler:")
+        guard current.responds(to: selector), let method = current.method(for: selector) else {
+          return
+        }
+        typealias OpenURL = @convention(c) (
+          AnyObject, Selector, URL, [String: Any], ((Bool) -> Void)?
+        ) -> Void
+        unsafeBitCast(method, to: OpenURL.self)(current, selector, url, [:], nil)
         return
       }
       responder = current.next
