@@ -92,6 +92,36 @@ void main() {
     );
   });
 
+  test('a turn can carry only kitchen events', () {
+    expect(
+      TurnRequest(
+        events: const [TimerFinished(timerId: 'timer-1', label: 'rice')],
+      ).toJson(),
+      {
+        'events': [
+          {'type': 'timer_finished', 'timer_id': 'timer-1', 'label': 'rice'},
+        ],
+      },
+    );
+  });
+
+  test('done says what is awaiting "Heard"', () {
+    final done =
+        StreamEvent.fromJson({
+              'type': 'done',
+              'stop_reason': 'end_turn',
+              'awaiting_ack': {'short': 'Chef, rice, twelve minutes. Heard?'},
+            })
+            as DoneEvent;
+    expect(done.awaitingAck?.short, 'Chef, rice, twelve minutes. Heard?');
+    expect(
+      (StreamEvent.fromJson({'type': 'done', 'stop_reason': 'end_turn'})
+              as DoneEvent)
+          .awaitingAck,
+      isNull,
+    );
+  });
+
   test('reads every stream event and skips unknown ones', () {
     expect(
       (StreamEvent.fromJson({

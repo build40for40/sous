@@ -43,6 +43,8 @@ class CookingState {
     this.transcript = const [],
     this.error,
     this.ended,
+    this.awaitingAck,
+    this.events = const [],
   });
 
   final CookingPhase phase;
@@ -67,6 +69,18 @@ class CookingState {
   /// Set once [CookingSession.end] succeeds.
   final EndedSession? ended;
 
+  /// The instruction from Sou's last reply still waiting for "Heard". Null
+  /// when nothing is waiting, and cleared as soon as the cook's next turn
+  /// goes.
+  final AwaitingAck? awaitingAck;
+
+  /// What happened on the phone since the cook's last turn, such as a timer
+  /// finishing. It goes to Sou with the cook's next turn.
+  final List<KitchenEvent> events;
+
+  /// Sou has something for the cook and is waiting to be asked.
+  bool get needsChef => events.isNotEmpty;
+
   bool get canSpeak =>
       phase == CookingPhase.ready || phase == CookingPhase.interrupted;
 
@@ -82,6 +96,9 @@ class CookingState {
     BrainException? error,
     bool clearError = false,
     EndedSession? ended,
+    AwaitingAck? awaitingAck,
+    bool clearAwaitingAck = false,
+    List<KitchenEvent>? events,
   }) => CookingState(
     phase: phase ?? this.phase,
     sessionId: sessionId ?? this.sessionId,
@@ -93,6 +110,8 @@ class CookingState {
     transcript: transcript ?? this.transcript,
     error: clearError ? null : error ?? this.error,
     ended: ended ?? this.ended,
+    awaitingAck: clearAwaitingAck ? null : awaitingAck ?? this.awaitingAck,
+    events: events ?? this.events,
   );
 }
 
@@ -131,6 +150,7 @@ class CookingSession {
   final _replyText = StreamController<String>.broadcast();
   CookingState _state = const CookingState();
   List<ToolResult> _owed = const [];
+  final List<KitchenEvent> _events = [];
   StreamSubscription<StreamEvent>? _reply;
   Completer<Object?>? _replyDone;
   List<ToolCall> _heldCalls = const [];
@@ -176,12 +196,36 @@ class CookingSession {
   /// disagrees about which tool results are owed, this waits or fixes the
   /// results and tries again, so the cook's words aren't lost.
   Future<void> say(String text) {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) throw ArgumentError.value(text, 'text', 'is empty');
+    if (text.trim().isEmpty) {
+      throw ArgumentError.value(text, 'text', 'is empty');
+    }
+    return send(text: text);
+  }
+
+  /// Opens a turn for the cook: [text] if they said anything, with every
+  /// [KitchenEvent] since their last turn. A tap on the flame with nothing
+  /// said sends just the events.
+  Future<void> send({String? text}) {
+    final trimmed = text?.trim();
+    final words = trimmed == null || trimmed.isEmpty ? null : trimmed;
+    if (words == null && _events.isEmpty) {
+      throw ArgumentError('A turn needs words or kitchen events');
+    }
     if (!_state.canSpeak) {
       throw StateError('Sou is busy (${_state.phase.name})');
     }
-    return _converse(TurnRequest(text: trimmed, toolResults: _owed));
+    return _converse(
+      TurnRequest(text: words, toolResults: _owed, events: List.of(_events)),
+    );
+  }
+
+  /// Something on the phone needs the cook, like a timer finishing. Sou
+  /// doesn't speak first: it goes with the cook's next turn, and
+  /// [CookingState.needsChef] is true until then.
+  void notify(KitchenEvent event) {
+    _events.add(event);
+    if (_events.length > TurnRequest.maxEvents) _events.removeAt(0);
+    _emit(_state.copyWith(events: List.unmodifiable(_events)));
   }
 
   /// Cuts Sou's reply off, for when the cook talks over Sou or taps to stop.
@@ -288,17 +332,21 @@ class CookingSession {
         if (generation != _generation) return null;
         continue;
       }
-      if (!fixedResults && request.text != null) {
+      if (!fixedResults && request.fromChef) {
         if (e.error == BrainError.toolResultsRequired) {
           fixedResults = true;
           _owe(e.toolCallIds);
-          request = TurnRequest(text: request.text, toolResults: _owed);
+          request = TurnRequest(
+            text: request.text,
+            toolResults: _owed,
+            events: request.events,
+          );
           continue;
         }
         if (e.code == 'unexpected_tool_results') {
           fixedResults = true;
           _owed = const [];
-          request = TurnRequest(text: request.text);
+          request = TurnRequest(text: request.text, events: request.events);
           continue;
         }
       }
@@ -314,14 +362,15 @@ class CookingSession {
     _emit(
       _state.copyWith(
         phase: CookingPhase.thinking,
-        reply: request.text == null ? null : '',
+        reply: request.fromChef ? '' : null,
         clearError: true,
+        clearAwaitingAck: true,
       ),
     );
     final sentAt = _clock().toUtc();
     final calls = <ToolCall>[];
     _heldCalls = calls;
-    final text = StringBuffer(request.text == null ? _state.reply : '');
+    final text = StringBuffer(request.fromChef ? '' : _state.reply);
     final replyStart = text.length;
     var needsSpace = text.isNotEmpty && !_state.reply.endsWith(' ');
     var heard = false;
@@ -356,8 +405,9 @@ class CookingSession {
                 );
               case ToolCallEvent(:final toolCall):
                 calls.add(toolCall);
-              case DoneEvent(:final stopReason):
+              case DoneEvent(:final stopReason, :final awaitingAck):
                 _owed = const [];
+                _events.removeWhere(request.events.contains);
                 final said = text.toString().substring(replyStart).trimLeft();
                 _emit(
                   _state.copyWith(
@@ -373,6 +423,10 @@ class CookingSession {
                           toolCalls: List.unmodifiable(calls),
                         ),
                     ],
+                    awaitingAck: stopReason == StopReason.endTurn
+                        ? awaitingAck
+                        : null,
+                    events: List.unmodifiable(_events),
                   ),
                 );
                 finish(
