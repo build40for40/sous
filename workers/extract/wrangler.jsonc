@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sous-extract",
+  "account_id": "9b4d3e616e55585a0ae844f424717b43",
+  "compatibility_date": "2026-11-04",
+  "main": "src/index.ts",
+  "vars": {
+    // Same shared AuthKit application as the brain.
+    "WORKOS_CLIENT_ID": "client_01M6E5ZDQ9XBYYE28XYN7H3XTJ",
+    "SOUS_EXTRACT_MODEL": "claude-opus-5-5",
+    "SOUS_DAILY_SHARE_LIMIT": "50"
+  },
+  "secrets": {
+    "required": ["ANTHROPIC_API_KEY"]
+  },
+  "durable_objects": {
+    "bindings": [
+      // One per user: their shares and what happened to each.
+      { "name": "SHARE_INBOX", "class_name": "ShareInbox" },
+      // One per post (or screenshot): read and extracted once, however many people share it.
+      { "name": "POST_EXTRACTION", "class_name": "PostExtraction" },
+      // The brain's per-user Durable Object, where finished recipes are saved.
+      { "name": "USER_BRAIN", "class_name": "UserBrain", "script_name": "sous-brain" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ShareInbox", "PostExtraction"] }],
+  // More specific than the brain's /sous/api/*, so these win.
+  "routes": [
+    { "pattern": "build40for40.com/sous/api/v1/shares", "zone_name": "build40for40.com" },
+    { "pattern": "build40for40.com/sous/api/v1/shares/*", "zone_name": "build40for40.com" }
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true }
+}

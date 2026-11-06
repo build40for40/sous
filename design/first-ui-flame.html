@@ -50,8 +50,43 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 .steps li.now { color: var(--text); }
 .steps li.now::before { color: var(--warm); }
 
+/* Saved */
+#saved { background: var(--black); overflow-y: auto; scrollbar-width: none; }
+#saved::-webkit-scrollbar { display: none; }
+.s-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.s-title { font-size: 36px; font-weight: 700; letter-spacing: -.025em; line-height: 1.05; }
+.add-link { font-size: 15px; font-weight: 600; color: var(--warm); flex: none; }
+.link-form { display: flex; gap: 8px; margin-top: 14px; }
+.link-form[hidden] { display: none; }
+.link-form input { flex: 1; min-width: 0; background: #111113; border: 1px solid var(--faint); border-radius: 12px; padding: 11px 12px; color: var(--text); font: inherit; font-size: 15px; }
+.link-form button { background: var(--text); color: #000; border-radius: 12px; padding: 0 16px; font-weight: 600; }
+.s-hint { font-size: 14px; color: var(--grey); margin: 14px 0 6px; }
+.row { display: grid; grid-template-columns: 20px 56px minmax(0, 1fr); gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--faint); width: 100%; text-align: left; }
+.row:last-child { border-bottom: 1px solid var(--faint); }
+.row .num { color: var(--grey); font-variant-numeric: tabular-nums; font-size: 15px; }
+.thumb { width: 56px; height: 56px; border-radius: 12px; background: var(--ph); }
+.thumb.none { background: #121214; display: grid; place-items: center; color: #4A4A4E; font-size: 22px; }
+.row .t { font-size: 17px; font-weight: 600; line-height: 1.2; }
+.row .m { font-size: 13px; color: var(--grey); margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.src { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; border: 1px solid #2E2E31; border-radius: 99px; padding: 1px 7px; color: var(--grey); }
+.src.sous { border-color: var(--warm); color: var(--warm); }
+.cooked { font-size: 13px; color: var(--text); opacity: .75; margin-top: 4px; }
+.cooked.new { color: var(--warm); opacity: 1; }
+.loading { animation: soft 1.4s ease-in-out infinite; }
+@keyframes soft { 50% { opacity: .4; } }
+
+/* Recipe extras */
+.hero { width: 100%; aspect-ratio: 4 / 3; max-width: 100%; border-radius: 20px; background: var(--ph); margin-bottom: 18px; }
+.r-src { margin-top: 10px; display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--grey); flex-wrap: wrap; }
+.journey { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+.journey::-webkit-scrollbar { display: none; }
+.shot { flex: none; width: 84px; display: grid; gap: 6px; font-size: 12px; color: var(--grey); text-align: left; }
+.shot .img { width: 84px; height: 84px; border-radius: 14px; background: var(--ph); background-size: cover; background-position: center; }
+.shot.add .img { border: 1px dashed #3A3A3C; background: transparent; display: grid; place-items: center; font-size: 28px; font-weight: 300; color: var(--grey); }
+.empty { font-size: 15px; color: var(--grey); line-height: 1.45; }
+
 /* Tabs */
-.tabs { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; gap: 36px; padding: 0 0 calc(env(safe-area-inset-bottom, 0px) + 30px); z-index: 2; }
+.tabs { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; gap: 36px; padding: 28px 0 calc(env(safe-area-inset-bottom, 0px) + 30px); z-index: 2; background: linear-gradient(to bottom, transparent, #000 45%); }
 .tabs button { font-size: 15px; font-weight: 600; color: var(--grey); padding: 6px 4px; transition: color .3s; }
 .tabs button[aria-selected="true"] { color: var(--text); }
 
@@ -70,43 +105,146 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
     </div>
   </section>
 
-  <section class="pane" id="recipe" aria-label="Recipe">
-    <div class="label" style="text-align:left">Tonight</div>
-    <div class="r-title">Tadka dahl</div>
-    <div class="r-meta">35 min · one pot · serves 2</div>
-    <div class="r-h">Ingredients</div>
-    <div id="ings"></div>
-    <div class="r-h">Method</div>
-    <ol class="steps" id="steps"></ol>
+  <section class="pane" id="recipe" aria-label="Recipe"></section>
+
+  <section class="pane" id="saved" aria-label="Saved recipes">
+    <div class="s-head"><div class="s-title">Saved</div><button class="add-link" id="addLink">+ Add from link</button></div>
+    <form class="link-form" id="linkForm" hidden>
+      <input id="linkInput" type="url" placeholder="Paste a recipe link" aria-label="Recipe link">
+      <button type="submit">Add</button>
+    </form>
+    <div class="s-hint">Say “Sous, number two”, or tap one</div>
+    <div id="savedList"></div>
   </section>
+
+  <input type="file" id="photoInput" accept="image/*" hidden>
 
   <nav class="tabs" role="tablist">
     <button role="tab" aria-selected="true" data-tab="sou">Sous</button>
     <button role="tab" aria-selected="false" data-tab="recipe">Recipe</button>
+    <button role="tab" aria-selected="false" data-tab="saved">Saved</button>
   </nav>
 </main>
 
 <script>
 const $ = s => document.querySelector(s);
 
-/* ---------- Recipe ---------- */
-const INGS = [
-  ["Red lentils", "200 g"], ["Basmati rice", "150 g"], ["Onion", "1"], ["Ginger", "2 cm"], ["Tomatoes", "2"],
-  ["Garlic", "5 cloves", "One more than the recipe. You asked last time."], ["Green chilli", "1"],
-  ["Cumin and mustard seeds", "1 tsp each"], ["Turmeric", "½ tsp"], ["Ghee", "2 tbsp"], ["Lemon", "½"],
+/* ---------- Recipes ---------- */
+// Photos are stand-ins: colour fields in each dish's palette, where real cook photos would go.
+const ph = (pal, i = 0) => `radial-gradient(circle at ${30 + (i * 17) % 40}% ${35 + (i * 11) % 30}%, ${pal[0]} 0 18%, transparent 46%), radial-gradient(circle at ${68 - (i * 13) % 30}% ${62 - (i * 7) % 20}%, ${pal[1]} 0 22%, transparent 55%), radial-gradient(circle at 50% 50%, ${pal[2]} 0 52%, #1B1A18 53% 58%, #0E0E0F 59%)`;
+const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov"];
+const shots = (n, startMonth) => Array.from({ length: n }, (_, i) => ({ label: `#${i + 1} · ${months[Math.min(10, startMonth + i)]}`, i }));
+
+const RECIPES = [
+  { id: "dahl", name: "Tadka dahl", src: "Instagram", mins: 35, kit: "one pot", serves: 2, pal: ["#F7C548", "#E8731C", "#B85A16"], cooked: 3, note: "Less salt next time", shots: shots(3, 7),
+    ings: [["Red lentils", "200 g"], ["Basmati rice", "150 g"], ["Onion", "1"], ["Ginger", "2 cm"], ["Tomatoes", "2"], ["Garlic", "5 cloves", "One more than the recipe. You asked last time."], ["Green chilli", "1"], ["Cumin and mustard seeds", "1 tsp each"], ["Turmeric", "½ tsp"], ["Ghee", "2 tbsp"], ["Lemon", "½"]],
+    steps: ["Rinse the lentils, then simmer them with 700 ml water and the turmeric.", "Put the rice on with the cumin seeds and 300 ml water.", "Soften the onion in a little ghee, then add the ginger.", "Add the tomatoes and cook them down until jammy.", "Stir the base into the lentils.", "Make the tadka: hot ghee, seeds, garlic and chilli, until it crackles.", "Pour the tadka over the dahl and cover.", "Squeeze in the lemon, taste for salt, and plate up."] },
+  { id: "bolo", name: "Kenji's bolognese", src: "Web", mins: 240, kit: "one pot", serves: 6, pal: ["#C8432A", "#8A2A16", "#5A2414"], cooked: 10, note: "A splash more milk", shots: shots(10, 1),
+    ings: [["Beef and pork mince", "500 g each"], ["Pancetta", "150 g"], ["Onion, carrot and celery", "1 each"], ["Whole milk", "250 ml"], ["White wine", "250 ml"], ["Tomato passata", "400 g"], ["Parmesan rind", "1"]],
+    steps: ["Brown the pancetta, then the mince in batches.", "Soften the onion, carrot and celery.", "Add the milk and simmer until it's almost gone.", "Add the wine, then the passata and the rind.", "Simmer very gently for about three hours.", "Season, then toss with fresh pasta."] },
+  { id: "salmon", name: "Miso salmon traybake", src: "Instagram", mins: 25, kit: "one tray", serves: 2, pal: ["#F29B6B", "#4E8F45", "#C9773E"], cooked: 0, shots: [],
+    ings: [["Salmon fillets", "2"], ["White miso", "2 tbsp"], ["Honey", "1 tbsp"], ["Tenderstem broccoli", "200 g"], ["Sesame seeds", "1 tsp"]],
+    steps: ["Heat the oven to 200°C.", "Mix the miso and honey, then brush it over the salmon.", "Roast the salmon and broccoli for 12 minutes.", "Scatter with sesame and serve."] },
+  { id: "noodles", name: "Gochujang butter noodles", src: "Instagram", mins: 20, kit: "one pan", serves: 2, pal: ["#D93A22", "#F2C14E", "#A82A18"], cooked: 1, note: "More butter", shots: shots(1, 9),
+    ings: [["Noodles", "200 g"], ["Butter", "30 g"], ["Gochujang", "1½ tbsp"], ["Soy sauce", "1 tbsp"], ["Spring onions", "2"], ["Egg", "1"]],
+    steps: ["Cook the noodles.", "Melt the butter with the gochujang and soy.", "Toss the noodles through the sauce.", "Top with a fried egg and spring onions."] },
+  { id: "carbonara", name: "Carbonara", src: "Sous", mins: 20, kit: "one pan", serves: 2, pal: [], cooked: 0, shots: [],
+    ings: [["Spaghetti", "200 g"], ["Guanciale", "100 g"], ["Egg yolks", "3, plus 1 whole egg"], ["Pecorino", "50 g"], ["Black pepper", "lots"]],
+    steps: ["Crisp the guanciale slowly in a dry pan.", "Whisk the eggs, pecorino and pepper.", "Toss the pasta with the guanciale off the heat.", "Add the egg mix and a splash of pasta water, and keep tossing until glossy."] },
+  { id: "shawarma", name: "Crispy chickpea shawarma", src: "Instagram", mins: 30, kit: "one tray", serves: 2, pal: ["#C9792E", "#E9DFC8", "#7A4A22"], cooked: 0, shots: [],
+    ings: [["Chickpeas", "400 g tin"], ["Shawarma spice", "2 tsp"], ["Flatbreads", "2"], ["Yoghurt", "4 tbsp"], ["Red onion", "1"]],
+    steps: ["Roast the spiced chickpeas for 25 minutes.", "Quick-pickle the onion in lemon.", "Fill the flatbreads and add the yoghurt."] },
+  { id: "orzo", name: "Lemon orzo with peas", src: "Web", mins: 22, kit: "one pot", serves: 2, pal: ["#F4E04D", "#7BC86C", "#E8DDB0"], cooked: 1, note: "Perfect as it is", shots: shots(1, 5),
+    ings: [["Orzo", "200 g"], ["Stock", "600 ml"], ["Peas", "150 g"], ["Lemon", "1"], ["Parmesan", "30 g"]],
+    steps: ["Toast the orzo in a little butter.", "Add the stock bit by bit, stirring.", "Peas in for the last two minutes.", "Finish with lemon and parmesan."] },
 ];
-const STEPS = [
-  "Rinse the lentils, then simmer them with 700 ml water and the turmeric.",
-  "Put the rice on with the cumin seeds and 300 ml water.",
-  "Soften the onion in a little ghee, then add the ginger.",
-  "Add the tomatoes and cook them down until jammy.",
-  "Stir the base into the lentils.",
-  "Make the tadka: hot ghee, seeds, garlic and chilli, until it crackles.",
-  "Pour the tadka over the dahl and cover.",
-  "Squeeze in the lemon, taste for salt, and plate up.",
-];
-$("#ings").innerHTML = INGS.map(i => `<div class="ing"><span>${i[0]}${i[2] ? `<small>${i[2]}</small>` : ""}</span><span>${i[1]}</span></div>`).join("");
-$("#steps").innerHTML = STEPS.map(s => `<li>${s}</li>`).join("");
+let current = RECIPES[0];
+
+const srcLine = r => r.src === "Instagram" ? "View the original post on Instagram" : r.src === "Web" ? "From a recipe website" : r.src === "Sous" ? "Written by Sous" : "";
+const time = m => m >= 60 ? `${Math.floor(m / 60)} hr${m % 60 ? " " + (m % 60) + " min" : ""}` : `${m} min`;
+
+function renderSaved() {
+  $("#savedList").innerHTML = RECIPES.map((r, i) => `
+    <button class="row" data-open="${r.id}">
+      <span class="num">${i + 1}</span>
+      ${r.pal.length ? `<span class="thumb" style="--ph:${ph(r.pal, r.shots.length)}"></span>` : `<span class="thumb none">·</span>`}
+      <span>
+        <span class="t ${r.loading ? "loading" : ""}">${r.name}</span>
+        <span class="m"><span class="src ${r.src === "Sous" ? "sous" : ""}">${r.src}</span>${r.mins ? time(r.mins) : ""}</span>
+        ${r.cooked ? `<span class="cooked">Cooked ${r.cooked}×${r.note ? ` · “${r.note}”` : ""}</span>` : r.loading ? "" : `<span class="cooked new">Not cooked yet</span>`}
+      </span>
+    </button>`).join("");
+}
+
+function renderRecipe() {
+  const r = current;
+  const hero = r.shots.length ? r.shots[r.shots.length - 1] : null;
+  $("#recipe").innerHTML = `
+    ${hero ? `<div class="hero" style="--ph:${hero.img ? `url(${hero.img}) center/cover` : ph(r.pal, hero.i)}"></div>` : ""}
+    <div class="label" style="text-align:left">${r === RECIPES[0] ? "Tonight" : "Recipe"}</div>
+    <div class="r-title">${r.name}</div>
+    <div class="r-meta">${time(r.mins)} · ${r.kit} · serves ${r.serves}</div>
+    <div class="r-src"><span class="src ${r.src === "Sous" ? "sous" : ""}">${r.src}</span>${srcLine(r)}</div>
+    <div class="r-h">Your cooks${r.shots.length ? ` · ${r.shots.length}` : ""}</div>
+    <div class="journey">
+      ${r.shots.map(s => `<div class="shot"><div class="img" style="background:${s.img ? `url(${s.img}) center/cover` : ph(r.pal, s.i)}"></div>${s.label}</div>`).join("")}
+      <button class="shot add" id="addPhoto"><div class="img">+</div>Add photo</button>
+    </div>
+    ${r.shots.length ? "" : `<p class="empty">No photos yet. Add one after you cook it, and you'll see how it changes each time.</p>`}
+    <div class="r-h">Ingredients</div>
+    ${r.ings.map(i => `<div class="ing"><span>${i[0]}${i[2] ? `<small>${i[2]}</small>` : ""}</span><span>${i[1]}</span></div>`).join("")}
+    <div class="r-h">Method</div>
+    <ol class="steps" id="steps">${r.steps.map(s => `<li>${s}</li>`).join("")}</ol>`;
+}
+
+function showTab(id) {
+  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === id));
+  document.querySelectorAll(".pane").forEach(p => p.classList.toggle("on", p.id === id));
+}
+
+document.addEventListener("click", e => {
+  const open = e.target.closest("[data-open]");
+  if (open) {
+    const r = RECIPES.find(x => x.id === open.dataset.open);
+    if (r && !r.loading) { current = r; renderRecipe(); $("#recipe").scrollTop = 0; showTab("recipe"); }
+    return;
+  }
+  if (e.target.closest("#addPhoto")) $("#photoInput").click();
+});
+
+$("#photoInput").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    current.shots.push({ img: rd.result, label: `#${current.shots.length + 1} · Today`, i: current.shots.length });
+    current.cooked = Math.max(current.cooked, current.shots.length);
+    renderRecipe(); renderSaved();
+  };
+  rd.readAsDataURL(f);
+  e.target.value = "";
+});
+
+$("#addLink").addEventListener("click", () => { $("#linkForm").hidden = !$("#linkForm").hidden; if (!$("#linkForm").hidden) $("#linkInput").focus(); });
+$("#linkForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("#linkInput").value.trim();
+  if (!v) return;
+  let host = "the web";
+  try { host = new URL(v.startsWith("http") ? v : "https://" + v).hostname.replace(/^www\./, ""); } catch (_) {}
+  const r = { id: "link" + Date.now(), name: `Reading ${host}…`, src: "Web", mins: 0, kit: "", serves: 2, pal: [], cooked: 0, shots: [], ings: [], steps: [], loading: true };
+  RECIPES.unshift(r);
+  $("#linkInput").value = ""; $("#linkForm").hidden = true;
+  renderSaved();
+  setTimeout(() => {
+    Object.assign(r, { name: "Roast chicken thighs with lemon", mins: 45, kit: "one tray", loading: false, pal: ["#E3B04B", "#F4E04D", "#9A5A22"],
+      ings: [["Chicken thighs", "6"], ["Lemon", "1"], ["Garlic", "1 bulb"], ["Thyme", "a few sprigs"]],
+      steps: ["Heat the oven to 220°C.", "Season the chicken and tuck in the lemon and garlic.", "Roast for 40 minutes until golden."] });
+    renderSaved();
+  }, 1800);
+});
+
+renderSaved(); renderRecipe();
 
 /* ---------- Conversation ---------- */
 // [what you say, what Sous says, label, current step index or -1]
@@ -162,10 +300,7 @@ function talk() {
 $("#sou").addEventListener("click", talk);
 $("#sou").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); talk(); } });
 
-document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
-  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b));
-  document.querySelectorAll(".pane").forEach(p => p.classList.toggle("on", p.id === b.dataset.tab));
-}));
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
 /* ---------- Orb ---------- */
 const canvas = $("#orb");
@@ -189,15 +324,15 @@ void main(){
   // straight down onto a burner: a dark iron core inside a ring of living blue fire
   float r=length(uv), a=atan(uv.y,uv.x);
   float R=.25;
-  float rot=t*(.04+.55*think);
+  float rot=t*.02;
   vec2 dA=vec2(cos(a+rot),sin(a+rot));
   float d=r-R;
-  float len=.075+.075*amp+.035*listen;
-  float tb=fbm(vec3(dA*2.2,d*8.-t*(1.3+2.2*amp)));
-  float tb2=fbm(vec3(dA*5.5,d*15.-t*(2.6+2.*amp))+1.8*tb);
-  float jets=.72+.28*pow(abs(cos(a*18.)),3.);
+  float len=.075+.05*amp+.015*listen;
+  float tb=fbm(vec3(dA*2.2,d*8.-t*.45));
+  float tb2=fbm(vec3(dA*4.5,d*13.-t*.8)+1.5*tb);
+  float jets=.84+.16*pow(abs(cos(a*18.)),3.);
   float fall=exp(-max(d,0.)/(len*(.45+1.1*tb2)))*smoothstep(-.012,.003,d);
-  float I=fall*jets*(.55+.75*tb2)*(1.+.5*listen+.35*amp);
+  float I=fall*jets*(.55+.75*tb2)*(1.+.2*listen+.45*amp);
   float rimLine=exp(-abs(d+.002)*170.)*(.75+.4*amp+.3*listen);
   I+=rimLine*.7;
   // blue normally; orange-red when Sous needs you; red when it's urgent
@@ -249,16 +384,16 @@ void main(){
       clock += dt * (reduce ? .25 : 1);
       // targets per state; talking gets a syllable-like flutter
       let tA = .04, tTh = 0, tL = 0;
-      if (state === "listening") { tA = .22 + .12 * Math.sin(now / 120) * Math.sin(now / 47); tL = 1; }
-      if (state === "thinking") { tA = .1; tTh = 1; }
-      if (state === "talking") { tA = .45 + .35 * Math.abs(Math.sin(now / 95) * Math.sin(now / 233 + 1)); }
+      if (state === "listening") { tA = .12 + .22 * (.5 + .5 * Math.sin(now / 280)); tL = 1; }
+      if (state === "thinking") { tA = .1 + .12 * (.5 + .5 * Math.sin(now / 420)); }
+      if (state === "talking") { tA = .18 + .2 * (.5 + .5 * Math.sin(now / 240)); }
       const k = 1 - Math.pow(.001, dt);
-      if (alertLevel === "urgent") tA = Math.max(tA, .35 + .3 * (Math.sin(now / 160) > 0 ? 1 : 0));
-      if (alertLevel === "notice") tA = Math.max(tA, .25 + .1 * Math.sin(now / 400));
+      if (alertLevel === "urgent") tA = Math.max(tA, .3 + .12 * Math.sin(now / 380));
+      if (alertLevel === "notice") tA = Math.max(tA, .2 + .05 * Math.sin(now / 700));
       warm += ((alertLevel === "notice" ? 1 : 0) - warm) * k * 1.2;
       urgent += ((alertLevel === "urgent" ? 1 : 0) - urgent) * k * 1.6;
-      amp += (tA - amp) * k * 1.4; think += (tTh - think) * k; listen += (tL - listen) * k;
-      if (!$("#recipe").classList.contains("on")) {
+      amp += (tA - amp) * k * .6; think += (tTh - think) * k; listen += (tL - listen) * k;
+      if ($("#sou").classList.contains("on")) {
         size();
         gl.uniform2f(uR, canvas.width, canvas.height);
         gl.uniform1f(uT, clock); gl.uniform1f(uA, Math.max(0, amp)); gl.uniform1f(uTh, think); gl.uniform1f(uL, listen); gl.uniform1f(uW, warm); gl.uniform1f(uU, urgent);

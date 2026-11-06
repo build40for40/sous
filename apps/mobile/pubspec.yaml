@@ -8,8 +8,12 @@ environment:
   flutter: 3.47.9
 
 dependencies:
+  crypto: ^3.0.8
   flutter:
     sdk: flutter
+  flutter_secure_storage: ^11.2.0
+  flutter_web_auth_2: ^5.1.0
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
