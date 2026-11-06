@@ -1,0 +1,118 @@
+{
+  "id": "session-example-1",
+  "recipe_id": "recipe-example-1",
+  "stage": "feedback",
+  "started_at": "2026-11-06T18:00:00Z",
+  "ended_at": "2026-11-06T18:12:00Z",
+  "turns": [
+    {
+      "role": "cook",
+      "at": "2026-11-06T18:00:05Z",
+      "text": "Let's do the beans on toast."
+    },
+    {
+      "role": "sous",
+      "at": "2026-11-06T18:00:07Z",
+      "text": "Lovely. First, grate thirty grams of cheddar now, before your hands get busy.",
+      "tool_calls": [
+        { "id": "toolu_fake_01", "name": "set_stage", "input": { "stage": "prep" } },
+        { "id": "toolu_fake_02", "name": "show", "input": { "view": "ingredients" } }
+      ]
+    },
+    {
+      "role": "tool",
+      "at": "2026-11-06T18:00:08Z",
+      "tool_results": [
+        { "tool_call_id": "toolu_fake_01", "content": "ok" },
+        { "tool_call_id": "toolu_fake_02", "content": "ok" }
+      ]
+    },
+    {
+      "role": "cook",
+      "at": "2026-11-06T18:02:00Z",
+      "text": "Cheese is grated. Beans are in the pan."
+    },
+    {
+      "role": "sous",
+      "at": "2026-11-06T18:02:02Z",
+      "text": "Nice one. Give them five minutes over a medium heat, and I'll start a timer.",
+      "tool_calls": [
+        { "id": "toolu_fake_03", "name": "set_stage", "input": { "stage": "cook" } },
+        { "id": "toolu_fake_04", "name": "go_to_step", "input": { "index": 0 } },
+        { "id": "toolu_fake_05", "name": "start_timer", "input": { "label": "beans", "seconds": 300 } }
+      ]
+    },
+    {
+      "role": "tool",
+      "at": "2026-11-06T18:02:03Z",
+      "tool_results": [
+        { "tool_call_id": "toolu_fake_03", "content": "ok" },
+        { "tool_call_id": "toolu_fake_04", "content": "ok" },
+        { "tool_call_id": "toolu_fake_05", "content": "timer-1" }
+      ]
+    },
+    {
+      "role": "cook",
+      "at": "2026-11-06T18:03:30Z",
+      "text": "I always go heavy on the pepper, by the way."
+    },
+    {
+      "role": "sous",
+      "at": "2026-11-06T18:03:31Z",
+      "tool_calls": [
+        { "id": "toolu_fake_06", "name": "note", "input": { "fact": "Likes lots of black pepper" } }
+      ]
+    },
+    {
+      "role": "tool",
+      "at": "2026-11-06T18:03:31Z",
+      "tool_results": [{ "tool_call_id": "toolu_fake_06", "content": "saved" }]
+    },
+    {
+      "role": "sous",
+      "at": "2026-11-06T18:03:32Z",
+      "text": "Noted. Pepper goes on right at the end."
+    },
+    {
+      "role": "cook",
+      "at": "2026-11-06T18:06:00Z",
+      "text": "They're bubbling already, cancel the timer."
+    },
+    {
+      "role": "sous",
+      "at": "2026-11-06T18:06:01Z",
+      "text": "Done. Get the toast on.",
+      "tool_calls": [
+        { "id": "toolu_fake_07", "name": "cancel_timer", "input": { "timer_id": "timer-1" } },
+        { "id": "toolu_fake_08", "name": "go_to_step", "input": { "index": 1 } }
+      ]
+    },
+    {
+      "role": "tool",
+      "at": "2026-11-06T18:06:02Z",
+      "tool_results": [
+        { "tool_call_id": "toolu_fake_07", "content": "ok" },
+        { "tool_call_id": "toolu_fake_08", "content": "ok" }
+      ]
+    },
+    {
+      "role": "cook",
+      "at": "2026-11-06T18:11:00Z",
+      "text": "Ate it. Ten out of ten."
+    },
+    {
+      "role": "sous",
+      "at": "2026-11-06T18:11:02Z",
+      "text": "Love that. Anything you'd change next time?",
+      "tool_calls": [{ "id": "toolu_fake_09", "name": "set_stage", "input": { "stage": "feedback" } }]
+    },
+    {
+      "role": "tool",
+      "at": "2026-11-06T18:11:03Z",
+      "tool_results": [{ "tool_call_id": "toolu_fake_09", "content": "ok" }]
+    }
+  ],
+  "facts": ["Likes lots of black pepper"],
+  "rating": 5,
+  "notes": "More cheese next time."
+}

@@ -3,7 +3,7 @@
 Day 5 of 40 for 40, built live on Twitch on Friday 6 November 2026. The problem is "Recipes stuck on Instagram", from Mac, who sponsored it.
 
 - **Form factor:** a Flutter phone app for iOS and Android. Setup, commands and CI are in `README.md`.
-- **Layout:** a monorepo. The Flutter app lives in `apps/mobile/` (run Flutter commands from there); `workers/brain`, `workers/web`, `workers/extract` and `packages/contracts` are placeholders for the backend. CI workflows are filtered by path, so each runs only when its component changes.
+- **Layout:** a monorepo. The Flutter app lives in `apps/mobile/` (run Flutter commands from there); `packages/contracts` holds the recipe and session JSON Schemas and the cooking tools that extraction, the brain and the app share (see its README); `workers/brain`, `workers/web` and `workers/extract` are placeholders for the backend. CI workflows are filtered by path, so each runs only when its component changes.
 - **Tracking:** the Superthread `day5` board, the "Day 5 - Sous" page, and the "Day 5 - brief & prep" page with the kickoff notes.
 
 Shared 40 for 40 context lives in `../AGENTS.md`.
