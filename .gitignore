@@ -18,3 +18,21 @@ dist/
 
 # macOS
 .DS_Store
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+coverage/
+*.iml
+.idea/
+*.ipr
+*.iws
+
+# Android
+android/key.properties
+*.jks
+*.keystore
