@@ -28,6 +28,7 @@ class MainApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
+        fontFamily: 'Inter',
         scaffoldBackgroundColor: Colors.black,
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFF6FA8FF),

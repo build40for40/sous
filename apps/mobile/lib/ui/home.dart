@@ -8,6 +8,7 @@ import '../cooking/cooking_session.dart';
 import '../cooking/cooking_tools.dart';
 import '../services.dart';
 import 'flame.dart';
+import 'widgets.dart';
 
 const _black = Color(0xFF000000);
 const _text = Color(0xFFF5F5F7);
@@ -299,7 +300,7 @@ class _HomeState extends State<Home> implements CookingTools {
       final done = _timers.firstWhere(
         (t) => t.left(DateTime.now()) == Duration.zero,
       );
-      return 'Chef! ${done.label}. Say “Heard” to stop.';
+      return 'Chef! ${done.label}.';
     }
     if (_selected == null) return 'Pick a recipe in Saved, then tap the flame';
     if (_session == null) return 'Tap the flame to cook ${_selected!.title}';
@@ -310,6 +311,14 @@ class _HomeState extends State<Home> implements CookingTools {
       return 'Didn’t catch that. Say it again.';
     }
     return _cooking.reply.isEmpty ? '…' : _cooking.reply;
+  }
+
+  String get _hint {
+    if (_alert == FlameAlert.alarm) return 'Say “Heard” to stop';
+    if (_alert == FlameAlert.headsUp) return 'Heads up';
+    if (_session == null) return '';
+    final said = _cooking.transcript.whereType<CookTurn>().lastOrNull?.text;
+    return said == null ? '' : '“$said”';
   }
 
   Widget _sousTab() {
@@ -356,49 +365,30 @@ class _HomeState extends State<Home> implements CookingTools {
               child: Semantics(
                 button: true,
                 label: 'Talk to Sous',
-                child: Flame(mood: _mood, alert: _alert),
+                child: TickerMode(
+                  enabled: _view == _View.sous,
+                  child: Flame(
+                    mood: _mood,
+                    alert: _alert,
+                    alignment: const Alignment(0, .45),
+                  ),
+                ),
               ),
             ),
           ),
-          Text(
-            _caption,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 21,
-              fontWeight: FontWeight.w500,
-              height: 1.3,
-              color: _text,
-            ),
-          ),
+          Caption(hint: _hint, said: _caption),
           const SizedBox(height: 18),
           if (_timers.isNotEmpty)
             Wrap(
-              spacing: 28,
+              spacing: 32,
+              runSpacing: 14,
               alignment: WrapAlignment.center,
               children: [
                 for (final t in _timers)
-                  Column(
-                    children: [
-                      Text(
-                        _clock(t.left(now)),
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w300,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                          color: t.left(now).inSeconds <= 30
-                              ? const Color(0xFFFFB340)
-                              : _text,
-                        ),
-                      ),
-                      Text(
-                        t.label,
-                        style: const TextStyle(fontSize: 13, color: _grey),
-                      ),
-                    ],
-                  ),
+                  TimerReadout(label: t.label, left: t.left(now)),
               ],
             ),
-          const Spacer(),
+          const Spacer(flex: 2),
           if (_session != null && _cooking.phase != CookingPhase.failed)
             TextField(
               controller: _say,
@@ -406,18 +396,20 @@ class _HomeState extends State<Home> implements CookingTools {
               onSubmitted: (_) => _send(),
               textInputAction: TextInputAction.send,
               style: const TextStyle(color: _text, fontSize: 16),
+              cursorColor: _accent,
               decoration: InputDecoration(
                 hintText: 'Talk to Sous (voice is coming)',
                 hintStyle: const TextStyle(color: _grey),
                 filled: true,
-                fillColor: const Color(0xFF111113),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
+                fillColor: SousColors.field,
+                isDense: true,
+                contentPadding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+                enabledBorder: _fieldBorder(_faint),
+                disabledBorder: _fieldBorder(_faint),
+                focusedBorder: _fieldBorder(const Color(0xFF3A3A3C)),
                 suffixIcon: IconButton(
                   onPressed: _send,
-                  icon: const Icon(Icons.arrow_upward, color: _text),
+                  icon: const Icon(Icons.arrow_upward_rounded, color: _text),
                 ),
               ),
             ),
@@ -462,12 +454,22 @@ class _HomeState extends State<Home> implements CookingTools {
       padding: const EdgeInsets.fromLTRB(28, 12, 28, 24),
       children: [
         Text(
+          cookingThis ? 'TONIGHT' : 'RECIPE',
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: .3,
+            color: _grey,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
           r.title,
           style: const TextStyle(
-            fontSize: 34,
+            fontSize: 36,
             fontWeight: FontWeight.w700,
             height: 1.05,
-            letterSpacing: -.6,
+            letterSpacing: -.9,
             color: _text,
           ),
         ),
@@ -476,10 +478,24 @@ class _HomeState extends State<Home> implements CookingTools {
           [
             if (minutes != null) '$minutes min',
             if (r.servings != null) 'serves ${r.servings}',
-            if (_source(r) != null) _source(r)!,
           ].join(' · '),
           style: const TextStyle(fontSize: 15, color: _grey),
         ),
+        if (_source(r) case final source?) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              SourcePill(source),
+              const SizedBox(width: 8),
+              Text(
+                source == 'Instagram'
+                    ? 'From a post on Instagram'
+                    : 'From a recipe website',
+                style: const TextStyle(fontSize: 13, color: _grey),
+              ),
+            ],
+          ),
+        ],
         const _Heading('Ingredients'),
         for (final i in r.ingredients)
           Container(
@@ -499,16 +515,28 @@ class _HomeState extends State<Home> implements CookingTools {
                         style: const TextStyle(fontSize: 17, color: _text),
                       ),
                       if (i.note != null)
-                        Text(
-                          i.note!,
-                          style: const TextStyle(fontSize: 13, color: _accent),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            i.note!,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: _accent,
+                            ),
+                          ),
                         ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 16),
                 Text(
                   _amount(i),
-                  style: const TextStyle(fontSize: 17, color: _grey),
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    color: _grey,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
               ],
             ),
@@ -522,22 +550,28 @@ class _HomeState extends State<Home> implements CookingTools {
               children: [
                 SizedBox(
                   width: 28,
-                  child: Text(
-                    '${n + 1}',
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 400),
                     style: TextStyle(
+                      fontFamily: 'Inter',
                       fontSize: 17,
+                      height: 1.4,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                       color: n == current ? _accent : _grey,
                     ),
+                    child: Text('${n + 1}'),
                   ),
                 ),
                 Expanded(
-                  child: Text(
-                    s.text,
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 400),
                     style: TextStyle(
+                      fontFamily: 'Inter',
                       fontSize: 17,
                       height: 1.4,
                       color: current == null || n == current ? _text : _grey,
                     ),
+                    child: Text(s.text),
                   ),
                 ),
               ],
@@ -580,13 +614,14 @@ class _HomeState extends State<Home> implements CookingTools {
               const Text(
                 'Saved',
                 style: TextStyle(
-                  fontSize: 34,
+                  fontSize: 36,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: -.6,
+                  height: 1.05,
+                  letterSpacing: -.9,
                   color: _text,
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               Text(
                 recipes.isEmpty
                     ? 'Share a recipe from Instagram to Sous and it lands here.'
@@ -598,19 +633,30 @@ class _HomeState extends State<Home> implements CookingTools {
                 InkWell(
                   onTap: () => _open(r),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: const BoxDecoration(
-                      border: Border(top: BorderSide(color: _faint)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: const BorderSide(color: _faint),
+                        bottom: n == recipes.length - 1
+                            ? const BorderSide(color: _faint)
+                            : BorderSide.none,
+                      ),
                     ),
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 30,
+                          width: 32,
                           child: Text(
                             '${n + 1}',
-                            style: const TextStyle(fontSize: 15, color: _grey),
+                            style: const TextStyle(
+                              fontSize: 15,
+                              color: _grey,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
                           ),
                         ),
+                        RecipeThumb(r.title),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -620,20 +666,25 @@ class _HomeState extends State<Home> implements CookingTools {
                                 style: const TextStyle(
                                   fontSize: 17,
                                   fontWeight: FontWeight.w600,
+                                  height: 1.2,
                                   color: _text,
                                 ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                [
-                                  _source(r) ?? 'Saved',
-                                  if (r.times?.totalMinutes != null)
-                                    '${r.times!.totalMinutes} min',
-                                ].join(' · '),
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: _grey,
-                                ),
+                              const SizedBox(height: 5),
+                              Row(
+                                children: [
+                                  SourcePill(_source(r) ?? 'Saved'),
+                                  if (r.times?.totalMinutes != null) ...[
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '${r.times!.totalMinutes} min',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: _grey,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ],
                           ),
@@ -663,8 +714,10 @@ String _amount(Ingredient i) {
   return [n, ?i.unit].join(' ');
 }
 
-String _clock(Duration d) =>
-    '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+OutlineInputBorder _fieldBorder(Color color) => OutlineInputBorder(
+  borderRadius: BorderRadius.circular(14),
+  borderSide: BorderSide(color: color),
+);
 
 class _Heading extends StatelessWidget {
   const _Heading(this.text);
@@ -673,7 +726,7 @@ class _Heading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 32, bottom: 10),
+    padding: const EdgeInsets.only(top: 34, bottom: 10),
     child: Text(
       text.toUpperCase(),
       style: const TextStyle(
