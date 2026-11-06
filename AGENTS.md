@@ -34,13 +34,17 @@ UX decisions from Lawrence, who owns the app:
 - The screen stays awake for the whole cooking session and goes back to normal when the session ends.
 - The app's background is mostly black, to save battery and so the phone sits quietly on the counter.
 - Hands-free works with a wake word, "Hey Sous" (as in sous chef). It's said like "Hey Sue", so it should also respond to close variants such as "Hey Sue" and "Hey Sue Chef".
+- The recipe picker is a numbered list, so the cook can choose by voice ("Hey Sous, number three"). It shows one hint of what to say.
+- Sou's face on the cook screen is a burner: a ring of gas flame on black. The flame shows Sou's state: low while waiting, rising while listening, flickering while thinking, and surging while talking.
+- Several timers can run at once, each named after what's cooking ("rice", "dahl"). Sou sets them by voice, and the app runs them, so they keep working if the brain drops out. They stack under the burner, change colour as they get close, and show on the lock screen.
+- "Game plan" is the name for Sou planning the cook with you, which is separate from prep (mise en place). A retro after the cook, which you can also add to later, such as the next day from the sofa ("it was too salty"), is a stretch goal.
 
 ## Still open
 
 Don't record architecture, design or tech choices here until the team has made them.
 
 - Whether there are any screens outside cooking, for browsing saved recipes and picking one
-- The rest of the app's look and feel, including what represents Sou on the cook screen
+- The rest of the app's look and feel
 - Where preferences and feedback are stored
 
 Ideas from kickoff, not commitments: prep reminders (dice the spring onions before your hands get messy), cooking with the fewest utensils, presentation tips, and a physical device such as an e-ink screen.
