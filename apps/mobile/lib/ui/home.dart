@@ -1,12 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../api/recipe.dart';
 import '../api/session.dart';
 import '../cooking/cooking_session.dart';
 import '../cooking/cooking_tools.dart';
+import '../cooking/kitchen_timers.dart';
 import '../services.dart';
+import '../voice/model_downloader.dart';
+import '../voice/voice_loop.dart';
 import 'flame.dart';
 import 'widgets.dart';
 
@@ -19,21 +23,6 @@ const _accent = Color(0xFF6FA8FF);
 /// Sous is home. The recipe slides up over it, and Saved slides in from the
 /// side.
 enum _View { sous, recipe, saved }
-
-/// A countdown Sous started.
-class _CookTimer {
-  _CookTimer(this.id, this.label, this.endsAt);
-
-  final String id;
-  final String label;
-  final DateTime endsAt;
-  bool heard = false;
-
-  Duration left(DateTime now) {
-    final d = endsAt.difference(now);
-    return d.isNegative ? Duration.zero : d;
-  }
-}
 
 /// The signed-in app: Sous (voice first), Recipe and Saved.
 class Home extends StatefulWidget {
@@ -54,10 +43,17 @@ class _HomeState extends State<Home> implements CookingTools {
   CookingState _cooking = const CookingState();
   StreamSubscription<CookingState>? _sub;
 
-  final List<_CookTimer> _timers = [];
-  int _timerCount = 0;
+  VoiceLoop? _loop;
+  VoiceState _voice = const VoiceState();
+  StreamSubscription<VoiceState>? _voiceSub;
+  DownloadProgress? _download;
+
+  final _kitchen = KitchenTimers();
+  late final StreamSubscription<KitchenTimer> _finished;
   Timer? _tick;
   final _say = TextEditingController();
+
+  List<KitchenTimer> get _timers => _kitchen.timers;
 
   @override
   void initState() {
@@ -65,13 +61,18 @@ class _HomeState extends State<Home> implements CookingTools {
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_timers.isNotEmpty && mounted) setState(() {});
     });
+    _finished = _kitchen.finished.listen((t) {
+      _session?.notify(TimerFinished(timerId: t.id, label: t.label));
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _tick?.cancel();
-    _sub?.cancel();
-    _session?.dispose();
+    unawaited(_finished.cancel());
+    _kitchen.dispose();
+    unawaited(_stopCooking());
     _say.dispose();
     super.dispose();
   }
@@ -80,18 +81,16 @@ class _HomeState extends State<Home> implements CookingTools {
 
   @override
   Future<String> startTimer(String label, int seconds) async {
-    final id = 'timer-${++_timerCount}';
-    setState(
-      () => _timers.add(
-        _CookTimer(id, label, DateTime.now().add(Duration(seconds: seconds))),
-      ),
-    );
+    final id = _kitchen.start(label, seconds);
+    setState(() {});
     return id;
   }
 
   @override
-  Future<void> cancelTimer(String timerId) async =>
-      setState(() => _timers.removeWhere((t) => t.id == timerId));
+  Future<void> cancelTimer(String timerId) async {
+    _kitchen.cancel(timerId);
+    setState(() {});
+  }
 
   @override
   Future<void> goToStep(int index) async => setState(() {});
@@ -108,23 +107,72 @@ class _HomeState extends State<Home> implements CookingTools {
 
   // ---- Cooking ----
 
+  /// Gets the voice ready (downloading its models the first time), starts
+  /// the cook, then listens. Typing still works if the voice can't start.
   Future<void> _startCooking() async {
     final recipe = _selected;
     if (recipe?.id == null) {
       _go(_View.saved);
       return;
     }
-    await _sub?.cancel();
-    await _session?.dispose();
+    await _stopCooking();
     final session = widget.services.cookingSession(this);
     _sub = session.states.listen((s) {
+      if (s.events.isEmpty && _cooking.events.isNotEmpty) {
+        _kitchen.clearFinished();
+      }
       if (mounted) setState(() => _cooking = s);
     });
     setState(() {
       _session = session;
-      _timers.clear();
+      _cooking = session.state;
+      _voice = const VoiceState();
     });
+    for (final t in [..._timers]) {
+      _kitchen.cancel(t.id);
+    }
+    unawaited(WakelockPlus.enable().catchError((Object _) {}));
+    final voiceReady = await _prepareVoice();
+    if (!mounted || _session != session) return;
     await session.start(recipe!.id!);
+    if (!mounted || _session != session || !voiceReady) return;
+    if (session.state.phase == CookingPhase.failed) return;
+    final loop = widget.services.voice.loopFor(session);
+    _loop = loop;
+    _voiceSub = loop.states.listen((s) {
+      if (mounted) setState(() => _voice = s);
+    });
+    await loop.start();
+  }
+
+  Future<bool> _prepareVoice() async {
+    final voice = widget.services.voice;
+    try {
+      if (await voice.isReady()) return true;
+      await for (final progress in voice.prepare()) {
+        if (mounted) setState(() => _download = progress);
+      }
+      return true;
+    } on Object catch (e) {
+      if (mounted)
+        setState(
+          () => _voice = VoiceState(status: VoiceStatus.failed, error: e),
+        );
+      return false;
+    } finally {
+      if (mounted) setState(() => _download = null);
+    }
+  }
+
+  Future<void> _stopCooking() async {
+    final loop = _loop;
+    final session = _session;
+    _loop = null;
+    await _voiceSub?.cancel();
+    await _sub?.cancel();
+    await loop?.dispose();
+    await session?.dispose();
+    await WakelockPlus.disable().catchError((Object _) {});
   }
 
   Future<void> _send() async {
@@ -132,21 +180,14 @@ class _HomeState extends State<Home> implements CookingTools {
     final session = _session;
     if (text.isEmpty || session == null || !_cooking.canSpeak) return;
     _say.clear();
-    if (RegExp(r'^heard\b', caseSensitive: false).hasMatch(text)) _hearAll();
     await session.say(text);
   }
 
-  /// "Heard": stops every alarm that's going off.
-  void _hearAll() => setState(() {
-    for (final t in _timers) {
-      if (t.left(DateTime.now()) == Duration.zero) t.heard = true;
-    }
-    _timers.removeWhere((t) => t.heard);
-  });
+  bool get _voiceOn => _loop?.running ?? false;
 
   FlameAlert get _alert {
     final now = DateTime.now();
-    if (_timers.any((t) => !t.heard && t.left(now) == Duration.zero)) {
+    if (_cooking.needsChef || _timers.any((t) => t.finished)) {
       return FlameAlert.alarm;
     }
     if (_timers.any((t) => t.left(now).inSeconds <= 30)) {
@@ -155,22 +196,39 @@ class _HomeState extends State<Home> implements CookingTools {
     return FlameAlert.none;
   }
 
-  FlameMood get _mood => switch (_cooking.phase) {
-    CookingPhase.starting ||
-    CookingPhase.thinking ||
-    CookingPhase.runningTools ||
-    CookingPhase.ending => FlameMood.thinking,
-    CookingPhase.replying => FlameMood.talking,
-    _ => FlameMood.idle,
-  };
+  FlameMood get _mood {
+    if (_voiceOn) {
+      return switch (_voice.flame) {
+        FlameState.chefSpeaking => FlameMood.listening,
+        FlameState.thinking => FlameMood.thinking,
+        FlameState.sousTalking => FlameMood.talking,
+        FlameState.waiting || FlameState.needsChef => FlameMood.idle,
+      };
+    }
+    if (_download != null) return FlameMood.thinking;
+    return switch (_cooking.phase) {
+      CookingPhase.starting ||
+      CookingPhase.thinking ||
+      CookingPhase.runningTools ||
+      CookingPhase.ending => FlameMood.thinking,
+      CookingPhase.replying => FlameMood.talking,
+      _ => FlameMood.idle,
+    };
+  }
 
+  /// The same as "Hey Sous": silences Sous, or opens a turn that carries
+  /// anything the phone has been waiting to tell Sous.
   void _tapFlame() {
-    if (_alert == FlameAlert.alarm) {
-      _hearAll();
+    final session = _session;
+    if (session == null || _cooking.phase == CookingPhase.failed) {
+      unawaited(_startCooking());
       return;
     }
-    if (_session == null || _cooking.phase == CookingPhase.failed) {
-      unawaited(_startCooking());
+    final loop = _loop;
+    if (loop != null && loop.running) {
+      unawaited(loop.openTurn());
+    } else if (_cooking.needsChef && _cooking.canSpeak) {
+      unawaited(session.send());
     }
   }
 
@@ -297,13 +355,14 @@ class _HomeState extends State<Home> implements CookingTools {
 
   String get _caption {
     if (_alert == FlameAlert.alarm) {
-      final done = _timers.firstWhere(
-        (t) => t.left(DateTime.now()) == Duration.zero,
-      );
-      return 'Chef! ${done.label}.';
+      final done = _timers.where((t) => t.finished).firstOrNull;
+      return done == null ? 'Sous needs you.' : 'Chef! ${done.label}.';
     }
     if (_selected == null) return 'Pick a recipe in Saved, then tap the flame';
     if (_session == null) return 'Tap the flame to cook ${_selected!.title}';
+    if (_download case final d?) {
+      return 'Getting Sous’s voice ready… ${(d.fraction * 100).round()}%';
+    }
     if (_cooking.phase == CookingPhase.failed) {
       return 'Sous couldn’t start. Tap to try again.';
     }
@@ -314,11 +373,18 @@ class _HomeState extends State<Home> implements CookingTools {
   }
 
   String get _hint {
-    if (_alert == FlameAlert.alarm) return 'Say “Heard” to stop';
+    if (_alert == FlameAlert.alarm) return 'Say “Hey Sous” or tap the flame';
     if (_alert == FlameAlert.headsUp) return 'Heads up';
     if (_session == null) return '';
+    if (_voiceOn && _voice.flame == FlameState.chefSpeaking) {
+      return _voice.partial.isEmpty ? 'Listening…' : '“${_voice.partial}”';
+    }
+    if (_voice.status == VoiceStatus.failed) {
+      return 'Voice didn’t start, so type to Sous';
+    }
     final said = _cooking.transcript.whereType<CookTurn>().lastOrNull?.text;
-    return said == null ? '' : '“$said”';
+    if (said != null) return '“$said”';
+    return _voiceOn ? 'Say “Hey Sous” or tap the flame' : '';
   }
 
   Widget _sousTab() {
@@ -398,7 +464,7 @@ class _HomeState extends State<Home> implements CookingTools {
               style: const TextStyle(color: _text, fontSize: 16),
               cursorColor: _accent,
               decoration: InputDecoration(
-                hintText: 'Talk to Sous (voice is coming)',
+                hintText: _voiceOn ? 'Or type to Sous' : 'Type to Sous',
                 hintStyle: const TextStyle(color: _grey),
                 filled: true,
                 fillColor: SousColors.field,

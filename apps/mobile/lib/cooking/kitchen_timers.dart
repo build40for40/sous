@@ -44,11 +44,15 @@ class KitchenTimers {
 
   /// Starts a countdown and returns its id.
   String start(String label, int seconds) {
-    if (seconds <= 0) {
-      throw ArgumentError.value(seconds, 'seconds', 'must be positive');
+    if (seconds < 0) {
+      throw ArgumentError.value(seconds, 'seconds', 'can’t be negative');
     }
     final length = Duration(seconds: seconds);
-    final timer = KitchenTimer('timer-${++_count}', label, _clock().add(length));
+    final timer = KitchenTimer(
+      'timer-${++_count}',
+      label,
+      _clock().add(length),
+    );
     _timers.add(timer);
     _alarms[timer.id] = _startTimer(length, () => _finish(timer));
     return timer.id;

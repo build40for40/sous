@@ -134,7 +134,7 @@ void main() {
     await tools.startTimer('dahl', 20);
     await tools.startTimer('tadka', 0);
     await settle(tester);
-    expect(find.text('Say “Heard” to stop'), findsOneWidget);
+    expect(find.text('Say “Hey Sous” or tap the flame'), findsOneWidget);
     await expectLater(
       find.byType(MainApp),
       matchesGoldenFile('goldens/home_timers.png'),

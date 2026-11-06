@@ -9,10 +9,12 @@ import 'local/platform_audio_io.dart';
 import 'local/sherpa_models.dart';
 import 'local/sherpa_speech_to_text.dart';
 import 'local/sherpa_text_to_speech.dart';
+import 'local/sherpa_wake_word.dart';
 import 'model_downloader.dart';
 import 'speech_to_text.dart';
 import 'text_to_speech.dart';
 import 'voice_loop.dart';
+import 'wake_word.dart';
 
 /// Which speech engines Sous uses. Only the on-device ones exist so far; a
 /// cloud engine plugs in here without touching [VoiceLoop].
@@ -23,11 +25,13 @@ class VoiceConfig {
     this.engine = VoiceEngine.local,
     this.duplex = DuplexMode.half,
     this.lightModels = false,
+    this.keywordSpotting = true,
   });
 
   /// Reads `--dart-define=SOUS_VOICE_ENGINE=local`,
-  /// `--dart-define=SOUS_FULL_DUPLEX=true` and
-  /// `--dart-define=SOUS_LIGHT_VOICE_MODELS=true`.
+  /// `--dart-define=SOUS_FULL_DUPLEX=true`,
+  /// `--dart-define=SOUS_LIGHT_VOICE_MODELS=true` and
+  /// `--dart-define=SOUS_WAKE_WORD=false`.
   factory VoiceConfig.fromEnvironment() => VoiceConfig(
     engine: VoiceEngine.values.byName(
       const String.fromEnvironment('SOUS_VOICE_ENGINE', defaultValue: 'local'),
@@ -36,6 +40,10 @@ class VoiceConfig {
         ? DuplexMode.full
         : DuplexMode.half,
     lightModels: const bool.fromEnvironment('SOUS_LIGHT_VOICE_MODELS'),
+    keywordSpotting: const bool.fromEnvironment(
+      'SOUS_WAKE_WORD',
+      defaultValue: true,
+    ),
   );
 
   final VoiceEngine engine;
@@ -43,6 +51,12 @@ class VoiceConfig {
 
   /// Moonshine tiny instead of base, for phones that struggle.
   final bool lightModels;
+
+  /// Spots "Hey Sous" with a small always-on model, which also catches it
+  /// while Sous is talking. Without it, "Hey Sous" still works when the
+  /// speech recogniser hears it at the start of what the chef says, and a
+  /// tap always works.
+  final bool keywordSpotting;
 }
 
 /// Sous's ears and mouth: the engines picked by [VoiceConfig], the models
@@ -52,6 +66,7 @@ class Voice {
     required this.audio,
     required this.speechToText,
     required this.textToSpeech,
+    this.wakeWord,
     this.settings = const VoiceLoopSettings(),
     this.models = const [],
     this.downloader,
@@ -75,17 +90,25 @@ class Voice {
           models: downloader,
           voice: Platform.isIOS ? SherpaVoice.kokoro : SherpaVoice.kitten,
         );
+        final wake = config.keywordSpotting
+            ? SherpaWakeWord(models: downloader)
+            : null;
         return Voice(
           audio: PlatformAudioIO(),
           speechToText: stt,
           textToSpeech: tts,
+          wakeWord: wake,
           settings: VoiceLoopSettings(
             duplex: config.duplex,
             // iOS voice processing ducks Sous's own playback, so it only
             // goes on when full duplex needs it.
             echoCancel: config.duplex == DuplexMode.full || Platform.isAndroid,
           ),
-          models: [...stt.requiredModels, ...tts.requiredModels],
+          models: [
+            ...stt.requiredModels,
+            ...tts.requiredModels,
+            ...?wake?.requiredModels,
+          ],
           downloader: downloader,
         );
     }
@@ -94,6 +117,9 @@ class Voice {
   final AudioIO audio;
   final SpeechToText speechToText;
   final TextToSpeech textToSpeech;
+
+  /// Null when only the speech recogniser and a tap open turns.
+  final WakeWord? wakeWord;
   final VoiceLoopSettings settings;
 
   /// What has to be downloaded before the first [VoiceLoop.start].
@@ -117,6 +143,7 @@ class Voice {
     speechToText: speechToText,
     textToSpeech: textToSpeech,
     session: session,
+    wakeWord: wakeWord,
     settings: settings,
   );
 
@@ -124,6 +151,7 @@ class Voice {
     await audio.dispose();
     await speechToText.dispose();
     await textToSpeech.dispose();
+    await wakeWord?.dispose();
   }
 }
 

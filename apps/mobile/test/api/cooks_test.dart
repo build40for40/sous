@@ -23,11 +23,13 @@ void main() {
 
   test('reads a suggestion', () {
     final suggestion = Suggestion.fromJson({
+      'number': 3,
       'recipe_id': 'r1',
       'title': 'Fake Example Beans on Toast',
       'reason': 'You loved it last time.',
     });
 
+    expect(suggestion.number, 3);
     expect(suggestion.reason, 'You loved it last time.');
   });
 }

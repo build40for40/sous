@@ -106,18 +106,17 @@ void main() {
   });
 
   test('done says what is awaiting "Heard"', () {
-    final done =
-        StreamEvent.fromJson({
-              'type': 'done',
-              'stop_reason': 'end_turn',
-              'awaiting_ack': {'short': 'Chef, rice, twelve minutes. Heard?'},
-            })
-            as DoneEvent;
+    final done = StreamEvent.fromJson({
+      'type': 'done',
+      'stop_reason': 'end_turn',
+      'awaiting_ack': {'short': 'Chef, rice, twelve minutes. Heard?'},
+    }) as DoneEvent;
     expect(done.awaitingAck?.short, 'Chef, rice, twelve minutes. Heard?');
     expect(
-      (StreamEvent.fromJson({'type': 'done', 'stop_reason': 'end_turn'})
-              as DoneEvent)
-          .awaitingAck,
+      (StreamEvent.fromJson({
+        'type': 'done',
+        'stop_reason': 'end_turn',
+      }) as DoneEvent).awaitingAck,
       isNull,
     );
   });
