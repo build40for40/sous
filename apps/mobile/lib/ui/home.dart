@@ -154,10 +154,11 @@ class _HomeState extends State<Home> implements CookingTools {
       }
       return true;
     } on Object catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => _voice = VoiceState(status: VoiceStatus.failed, error: e),
         );
+      }
       return false;
     } finally {
       if (mounted) setState(() => _download = null);
