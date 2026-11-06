@@ -27,13 +27,20 @@ Each one has a card on the `day5` board.
 
 The recipe format links extraction to the brain, and the session format links the brain to the app. Agree any change to either with the workstream on the other side.
 
+## Decided
+
+UX decisions from Lawrence, who owns the app:
+
+- The screen stays awake for the whole cooking session and goes back to normal when the session ends.
+- The app's background is mostly black, to save battery and so the phone sits quietly on the counter.
+- Hands-free works with a wake word, "Hey Sous" (as in sous chef). It's said like "Hey Sue", so it should also respond to close variants such as "Hey Sue" and "Hey Sue Chef".
+
 ## Still open
 
 Don't record architecture, design or tech choices here until the team has made them.
 
 - Whether there are any screens outside cooking, for browsing saved recipes and picking one
-- How hands-free works: a voice button, a session that keeps listening, or a wake word
-- The app's look and feel
+- The rest of the app's look and feel, including what represents Sou on the cook screen
 - Where preferences and feedback are stored
 
 Ideas from kickoff, not commitments: prep reminders (dice the spring onions before your hands get messy), cooking with the fewest utensils, presentation tips, and a physical device such as an e-ink screen.
