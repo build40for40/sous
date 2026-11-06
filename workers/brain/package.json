@@ -12,6 +12,7 @@
     "wrangler": "env -u CLOUDFLARE_API_KEY -u CLOUDFLARE_EMAIL wrangler --profile 40for40"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
     "@cfworker/json-schema": "^4.1.6",
     "@sous/contracts": "file:../../packages/contracts",
     "jose": "^6.2.15"

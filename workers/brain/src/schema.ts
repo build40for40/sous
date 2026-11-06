@@ -39,6 +39,12 @@ const migrations: string[] = [
   );
   CREATE INDEX sessions_recipe_id ON sessions (recipe_id);
   `,
+  `
+  ALTER TABLE sessions ADD COLUMN model TEXT;
+  ALTER TABLE sessions ADD COLUMN context TEXT NOT NULL DEFAULT '';
+  ALTER TABLE sessions ADD COLUMN turns TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE sessions ADD COLUMN facts TEXT NOT NULL DEFAULT '[]';
+  `,
 ];
 
 export const SCHEMA_VERSION = migrations.length;

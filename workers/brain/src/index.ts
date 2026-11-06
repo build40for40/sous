@@ -1,6 +1,7 @@
 import { BASE_PATH, error, HttpError, json, readJson } from "./http";
 import { parseProfilePatch } from "./profile";
 import { validateRecipe } from "./recipes";
+import { parseNewSession, parseTurnRequest } from "./sessions";
 import { authenticate, deleteWorkosUser } from "./workos";
 
 import type { UserBrain } from "./brain";
@@ -8,10 +9,11 @@ import type { UserBrain } from "./brain";
 export { UserBrain } from "./brain";
 
 const MAX_BODY_BYTES = 256 * 1024;
+const MAX_TURN_BYTES = 32 * 1024;
 
 // The generated stub types recurse too deeply on JSON preferences, so the stub is typed from the class directly.
 type Rpc<T> = { [K in keyof T]: T[K] extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never };
-type Brain = Rpc<Pick<UserBrain, "getProfile" | "updateProfile" | "wipe" | "listRecipes" | "getRecipe" | "createRecipe" | "deleteRecipe">>;
+type Brain = Rpc<Pick<UserBrain, "getProfile" | "updateProfile" | "wipe" | "listRecipes" | "getRecipe" | "createRecipe" | "deleteRecipe" | "createSession" | "takeTurn">>;
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -63,6 +65,20 @@ async function route(request: Request, path: string, userId: string, brain: Brai
     }
     if (method === "DELETE") return (await brain.deleteRecipe(id)) ? new Response(null, { status: 204 }) : error(404, "recipe_not_found");
     return methodNotAllowed("GET, DELETE");
+  }
+
+  if (path === "/sessions") {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!env.ANTHROPIC_API_KEY) return error(503, "live_sessions_unavailable");
+    const session = await brain.createSession(parseNewSession(await readJson(request, MAX_BODY_BYTES)).recipe_id);
+    return session ? json(session, 201) : error(404, "recipe_not_found");
+  }
+
+  const sessionId = path.match(/^\/sessions\/([A-Za-z0-9-]+)\/turns$/)?.[1];
+  if (sessionId) {
+    if (method !== "POST") return methodNotAllowed("POST");
+    if (!env.ANTHROPIC_API_KEY) return error(503, "live_sessions_unavailable");
+    return brain.takeTurn(sessionId, parseTurnRequest(await readJson(request, MAX_TURN_BYTES)));
   }
 
   return error(404, "not_found");
