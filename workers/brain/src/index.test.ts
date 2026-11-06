@@ -57,6 +57,7 @@ describe("auth", () => {
 
   it("returns 404 for unknown routes once signed in", async () => {
     expect((await call("/nope", { user: "user_routes" })).status).toBe(404);
+    expect((await call("/recipes/%E0", { user: "user_routes" })).status).toBe(404);
   });
 });
 

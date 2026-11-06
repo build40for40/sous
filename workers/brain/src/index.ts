@@ -55,9 +55,8 @@ async function route(request: Request, path: string, userId: string, brain: Brai
     return methodNotAllowed("GET, POST");
   }
 
-  const recipeId = path.match(/^\/recipes\/([^/]+)$/)?.[1];
-  if (recipeId) {
-    const id = decodeURIComponent(recipeId);
+  const id = path.match(/^\/recipes\/([A-Za-z0-9-]+)$/)?.[1];
+  if (id) {
     if (method === "GET") {
       const recipe = await brain.getRecipe(id);
       return recipe ? json(recipe) : error(404, "recipe_not_found");
