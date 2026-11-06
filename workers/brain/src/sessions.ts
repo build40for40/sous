@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { Validator, type Schema } from "@cfworker/json-schema";
-import { clientToolNames, sessionSchema, type ClientToolName, type Stage, type StreamEvent, type ToolCall, type Turn, type TurnRequest } from "@sous/contracts";
+import { clientToolNames, sessionSchema, type AwaitingAck, type ClientToolName, type PhoneEvent, type Stage, type StreamEvent, type ToolCall, type Turn, type TurnRequest } from "@sous/contracts";
 import { HttpError, isPlainObject } from "./http";
 
 export interface SessionRow extends Record<string, SqlStorageValue> {
@@ -87,11 +87,34 @@ export function appendTurnRequest(messages: Anthropic.MessageParam[], request: T
     ...(request.tool_results ?? []).map(
       (r): Anthropic.ToolResultBlockParam => ({ type: "tool_result", tool_use_id: r.tool_call_id, content: r.content, ...(r.is_error ? { is_error: true } : {}) }),
     ),
+    ...(request.events ?? []).map((e): Anthropic.TextBlockParam => ({ type: "text", text: phoneEventText(e) })),
     ...(request.text ? [{ type: "text" as const, text: request.text }] : []),
   ];
   const last = messages.at(-1);
   if (last?.role === "user") return [...messages.slice(0, -1), { role: "user", content: [...blocks(last), ...content] }];
   return [...messages, { role: "user", content }];
+}
+
+export const PHONE_PREFIX = "[Phone]";
+
+/** How a phone event reads to Claude: marked as coming from the phone, so it's never mistaken for the chef. */
+export function phoneEventText(event: PhoneEvent): string {
+  return `${PHONE_PREFIX} The ${JSON.stringify(event.label)} timer (id ${event.timer_id}) has finished. The flame went red and the chef has opened a turn to hear what you need.`;
+}
+
+/** The await_ack still open since the chef last opened a turn: the last one Claude called after the newest user message with text in it. */
+export function awaitingAck(messages: Anthropic.MessageParam[]): AwaitingAck | null {
+  const opened = messages.findLastIndex((m) => m.role === "user" && blocks(m).some((b) => b.type === "text"));
+  let short: string | null = null;
+  for (const message of messages.slice(opened + 1)) {
+    if (message.role !== "assistant") continue;
+    for (const block of blocks(message)) {
+      if (block.type !== "tool_use" || block.name !== "await_ack") continue;
+      const value = (block.input as { short?: unknown } | null)?.short;
+      if (typeof value === "string" && value.trim()) short = value.trim();
+    }
+  }
+  return short ? { short } : null;
 }
 
 export function requestTurns(request: TurnRequest, at: string): Turn[] {

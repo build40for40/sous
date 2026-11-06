@@ -58,7 +58,7 @@ describe("UserBrain", () => {
     });
   });
 
-  it("keeps what Sou learned when about is replaced, and reads it back as a list", async () => {
+  it("keeps what Sous learned when about is replaced, and reads it back as a list", async () => {
     await runInDurableObject(brainFor("user_learned"), (brain: UserBrain, state) => {
       const recipe = brain.listRecipes()[0];
       writeReflection(state.storage.sql, { id: "aaaaaaaa-1111-4111-8111-111111111111", started_at: "2026-11-06T18:00:00Z", recipe, notes: null, reflection: { ...fakeReflection, rating: 5 } }, "2026-11-06T19:00:00Z");

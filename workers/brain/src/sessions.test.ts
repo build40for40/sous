@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { HttpError } from "./http";
-import { appendTurnRequest, owedToolCalls, parseNewSession, parseTurnRequest, requestTurns, sousTurn, sse, toolCallProblem } from "./sessions";
+import { appendTurnRequest, awaitingAck, owedToolCalls, parseNewSession, parseTurnRequest, phoneEventText, requestTurns, sousTurn, sse, toolCallProblem } from "./sessions";
 
 const toolUse = (id: string, name = "show", input: unknown = { view: "step" }) => ({ type: "tool_use" as const, id, name, input });
 const toolResult = (id: string, content = "ok") => ({ type: "tool_result" as const, tool_use_id: id, content });
@@ -22,7 +22,22 @@ describe("parseTurnRequest", () => {
     expect(parseTurnRequest(results)).toEqual(results);
   });
 
-  it.each([[{}], [{ text: "" }], [{ tool_results: [] }], [{ text: "hi", extra: 1 }], [{ tool_results: [{ tool_call_id: "t1" }] }]])("rejects %j", (input) => {
+  it("accepts phone events, with or without anything the chef said", () => {
+    const events = [{ type: "timer_finished", timer_id: "timer-1", label: "rice" }];
+    expect(parseTurnRequest({ events })).toEqual({ events });
+    expect(parseTurnRequest({ events, text: "What's up?" })).toEqual({ events, text: "What's up?" });
+  });
+
+  it.each([
+    [{}],
+    [{ text: "" }],
+    [{ tool_results: [] }],
+    [{ text: "hi", extra: 1 }],
+    [{ tool_results: [{ tool_call_id: "t1" }] }],
+    [{ events: [] }],
+    [{ events: [{ type: "timer_finished", timer_id: "timer-1" }] }],
+    [{ events: [{ type: "kids_home" }] }],
+  ])("rejects %j", (input) => {
     expect(() => parseTurnRequest(input)).toThrow(HttpError);
   });
 });
@@ -32,11 +47,13 @@ describe("toolCallProblem", () => {
     expect(toolCallProblem({ id: "t", name: "start_timer", input: { label: "pasta", seconds: 600 } }, 3)).toBeNull();
     expect(toolCallProblem({ id: "t", name: "go_to_step", input: { index: 2 } }, 3)).toBeNull();
     expect(toolCallProblem({ id: "t", name: "note", input: { fact: "Hates coriander" } }, 3)).toBeNull();
+    expect(toolCallProblem({ id: "t", name: "await_ack", input: { short: "Chef, rice. Heard?" } }, 3)).toBeNull();
   });
 
   it("explains what's wrong with a bad call", () => {
     expect(toolCallProblem({ id: "t", name: "start_timer", input: { label: "pasta", seconds: 0 } }, 3)).toMatch(/Invalid start_timer/);
     expect(toolCallProblem({ id: "t", name: "note", input: { fact: "" } }, 3)).toMatch(/Invalid note/);
+    expect(toolCallProblem({ id: "t", name: "await_ack", input: { short: "" } }, 3)).toMatch(/Invalid await_ack/);
     expect(toolCallProblem({ id: "t", name: "go_to_step", input: { index: 3 } }, 3)).toMatch(/has 3 steps/);
     expect(toolCallProblem({ id: "t", name: "show", input: "{broken" }, 3)).toMatch(/Invalid show/);
   });
@@ -76,6 +93,13 @@ describe("appendTurnRequest", () => {
     expect(owing[2].content).toHaveLength(1);
   });
 
+  it("tells Claude about phone events before what the chef said, marked as coming from the phone", () => {
+    const event = { type: "timer_finished" as const, timer_id: "timer-1", label: "rice" };
+    const next = appendTurnRequest([], { events: [event], text: "Yes?" });
+    expect(next).toEqual([{ role: "user", content: [{ type: "text", text: phoneEventText(event) }, { type: "text", text: "Yes?" }] }]);
+    expect(phoneEventText(event)).toBe('[Phone] The "rice" timer (id timer-1) has finished. The flame went red and the chef has opened a turn to hear what you need.');
+  });
+
   it("insists on a result for every owed call, and only those", () => {
     const owed = (fn: () => unknown) => {
       try {
@@ -90,7 +114,43 @@ describe("appendTurnRequest", () => {
   });
 });
 
+describe("awaitingAck", () => {
+  const ack = (id: string, short: string) => toolUse(id, "await_ack", { short });
+  const said = (text: string): Anthropic.MessageParam => ({ role: "user", content: [{ type: "text", text }] });
+
+  it("is the last await_ack since the chef last opened a turn", () => {
+    const messages: Anthropic.MessageParam[] = [
+      said("Rice next?"),
+      { role: "assistant", content: [{ type: "text", text: "Chef, rice in the pan.", citations: null }, ack("a1", "Chef, rice in. Heard?"), toolUse("s1")] },
+      { role: "user", content: [toolResult("a1", "Waiting for the chef."), toolResult("s1")] },
+      { role: "assistant", content: [{ type: "text", text: "Twelve minutes. Set it?", citations: null }, ack("a2", "  Chef, rice timer?  ")] },
+      { role: "user", content: [toolResult("a2", "Waiting for the chef.")] },
+    ];
+    expect(awaitingAck(messages)).toEqual({ short: "Chef, rice timer?" });
+  });
+
+  it("is cleared once the chef says anything, or the phone opens a turn", () => {
+    const messages: Anthropic.MessageParam[] = [
+      said("Rice next?"),
+      { role: "assistant", content: [ack("a1", "Chef, rice in. Heard?")] },
+      { role: "user", content: [toolResult("a1", "Waiting for the chef."), { type: "text", text: "Heard." }] },
+    ];
+    expect(awaitingAck(messages)).toBeNull();
+    expect(awaitingAck([...messages, { role: "assistant", content: [{ type: "text", text: "Lovely.", citations: null }] }])).toBeNull();
+    expect(awaitingAck([])).toBeNull();
+  });
+
+  it("ignores a broken await_ack", () => {
+    expect(awaitingAck([said("Go"), { role: "assistant", content: [toolUse("a1", "await_ack", { short: "  " })] }])).toBeNull();
+    expect(awaitingAck([said("Go"), { role: "assistant", content: [toolUse("a1", "await_ack", "{broken")] }])).toBeNull();
+  });
+});
+
 describe("transcript turns", () => {
+  it("leaves phone events out of the transcript", () => {
+    expect(requestTurns({ events: [{ type: "timer_finished", timer_id: "timer-1", label: "rice" }] }, "2026-11-06T18:00:00Z")).toEqual([]);
+  });
+
   it("records results before what the cook said", () => {
     const results = [{ tool_call_id: "t1", content: "ok" }];
     expect(requestTurns({ text: "next", tool_results: results }, "2026-11-06T18:00:00Z")).toEqual([

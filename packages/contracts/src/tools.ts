@@ -2,7 +2,7 @@ import toolsJson from "../tools.json";
 import type { Stage } from "./session";
 
 export const clientToolNames = ["start_timer", "cancel_timer", "go_to_step", "set_stage", "show"] as const;
-export const serverToolNames = ["note"] as const;
+export const serverToolNames = ["note", "await_ack"] as const;
 
 export type ClientToolName = (typeof clientToolNames)[number];
 export type ServerToolName = (typeof serverToolNames)[number];
@@ -17,6 +17,7 @@ export interface ToolInputs {
   set_stage: { stage: Stage };
   show: { view: ShowView };
   note: { fact: string };
+  await_ack: { short: string };
 }
 
 export interface ToolDefinition {
