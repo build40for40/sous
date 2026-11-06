@@ -1,0 +1,40 @@
+name: Brain
+
+on:
+  pull_request:
+    paths:
+      - workers/brain/**
+      - packages/contracts/**
+      - .github/workflows/brain.yml
+  push:
+    branches: [main]
+    paths:
+      - workers/brain/**
+      - packages/contracts/**
+      - .github/workflows/brain.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: workers/brain
+
+concurrency:
+  group: brain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: workers/brain/.node-version
+          cache: npm
+          cache-dependency-path: workers/brain/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test

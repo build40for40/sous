@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sous-brain",
+  "account_id": "9b4d3e616e55585a0ae844f424717b43",
+  "compatibility_date": "2026-11-04",
+  "main": "src/index.ts",
+  "vars": {
+    "WORKOS_CLIENT_ID": "client_01M6E5ZDQ9XBYYE28XYN7H3XTJ",
+    "SOUS_LIVE_MODEL": "claude-sonnet-5-5"
+  },
+  "secrets": {
+    "required": ["WORKOS_API_KEY", "ANTHROPIC_API_KEY"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "USER_BRAIN", "class_name": "UserBrain" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserBrain"] }],
+  "routes": [
+    { "pattern": "build40for40.com/sous/api", "zone_name": "build40for40.com" },
+    { "pattern": "build40for40.com/sous/api/*", "zone_name": "build40for40.com" }
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true }
+}

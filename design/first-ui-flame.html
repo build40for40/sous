@@ -1,0 +1,268 @@
+<title>Sous Blue Flame</title>
+<style>
+/* One gas flame on black. Tap it, or say "Hey Sous". A second tab holds the recipe as plain text. */
+:root {
+  color-scheme: dark;
+  --black: #000;
+  --text: #F5F5F7;
+  --grey: #7C7C80;
+  --faint: #1F1F21;
+  --warm: #6FA8FF;
+  --sf: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--black); color: var(--text); font-family: var(--sf); display: grid; place-items: center; overflow: hidden; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+button:focus-visible { outline: 2px solid var(--warm); outline-offset: 4px; border-radius: 8px; }
+
+.app { position: relative; width: 100%; height: 100%; max-width: 430px; overflow: hidden; background: var(--black); }
+@media (min-width: 600px) and (min-height: 700px) {
+  .app { height: min(860px, calc(100% - 48px)); max-width: 400px; border-radius: 52px; box-shadow: 0 0 0 1px #161618; }
+}
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.fallback { position: absolute; left: 50%; top: 44%; width: 62%; aspect-ratio: 2.4; transform: translate(-50%, -50%); border-radius: 50%; border: 6px solid #3D7BFF; box-shadow: 0 0 30px #2F6BFF, inset 0 0 20px #2F6BFF; background: #0B0B0D; }
+
+.pane { position: absolute; inset: 0; display: flex; flex-direction: column;
+  padding: calc(env(safe-area-inset-top, 0px) + 56px) max(28px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 84px) max(28px, env(safe-area-inset-left, 0px));
+  opacity: 0; pointer-events: none; transition: opacity .5s ease; }
+.pane.on { opacity: 1; pointer-events: auto; }
+
+/* Sous */
+#sou { cursor: pointer; }
+.label { font-size: 13px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--grey); text-align: center; transition: opacity .4s; }
+.caption { margin-top: auto; text-align: center; display: grid; gap: 10px; justify-items: center; min-height: 128px; align-content: end; }
+.you { font-size: 16px; color: var(--grey); min-height: 1.3em; transition: opacity .35s; }
+.said { font-size: 22px; font-weight: 500; letter-spacing: -.015em; line-height: 1.3; max-width: 22ch; text-wrap: balance; min-height: 2.6em; transition: opacity .35s; }
+.fade { opacity: 0; }
+
+/* Recipe */
+#recipe { background: var(--black); overflow-y: auto; scrollbar-width: none; }
+#recipe::-webkit-scrollbar { display: none; }
+.r-title { font-size: 36px; font-weight: 700; letter-spacing: -.025em; line-height: 1.05; margin: 4px 0 6px; }
+.r-meta { font-size: 15px; color: var(--grey); }
+.r-h { font-size: 13px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--grey); margin: 34px 0 10px; }
+.ing { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--faint); font-size: 17px; }
+.ing span:last-child { color: var(--grey); font-variant-numeric: tabular-nums; text-align: right; }
+.ing small { display: block; color: var(--warm); font-size: 13px; margin-top: 2px; }
+.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 18px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; font-size: 17px; line-height: 1.4; color: var(--grey); transition: color .4s; }
+.steps li::before { content: counter(s); font-variant-numeric: tabular-nums; }
+.steps li.now { color: var(--text); }
+.steps li.now::before { color: var(--warm); }
+
+/* Tabs */
+.tabs { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; gap: 36px; padding: 0 0 calc(env(safe-area-inset-bottom, 0px) + 30px); z-index: 2; }
+.tabs button { font-size: 15px; font-weight: 600; color: var(--grey); padding: 6px 4px; transition: color .3s; }
+.tabs button[aria-selected="true"] { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) { .pane, .you, .said { transition: none; } }
+</style>
+
+<main class="app">
+  <canvas id="orb" aria-hidden="true"></canvas>
+  <div class="fallback" id="fallback" hidden></div>
+
+  <section class="pane on" id="sou" role="button" tabindex="0" aria-label="Talk to Sous">
+    <div class="label" id="where">Friday night</div>
+    <div class="caption" aria-live="polite">
+      <div class="you" id="you"></div>
+      <div class="said" id="said">Tap, or say “Hey Sous”</div>
+    </div>
+  </section>
+
+  <section class="pane" id="recipe" aria-label="Recipe">
+    <div class="label" style="text-align:left">Tonight</div>
+    <div class="r-title">Tadka dahl</div>
+    <div class="r-meta">35 min · one pot · serves 2</div>
+    <div class="r-h">Ingredients</div>
+    <div id="ings"></div>
+    <div class="r-h">Method</div>
+    <ol class="steps" id="steps"></ol>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="sou">Sous</button>
+    <button role="tab" aria-selected="false" data-tab="recipe">Recipe</button>
+  </nav>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+
+/* ---------- Recipe ---------- */
+const INGS = [
+  ["Red lentils", "200 g"], ["Basmati rice", "150 g"], ["Onion", "1"], ["Ginger", "2 cm"], ["Tomatoes", "2"],
+  ["Garlic", "5 cloves", "One more than the recipe. You asked last time."], ["Green chilli", "1"],
+  ["Cumin and mustard seeds", "1 tsp each"], ["Turmeric", "½ tsp"], ["Ghee", "2 tbsp"], ["Lemon", "½"],
+];
+const STEPS = [
+  "Rinse the lentils, then simmer them with 700 ml water and the turmeric.",
+  "Put the rice on with the cumin seeds and 300 ml water.",
+  "Soften the onion in a little ghee, then add the ginger.",
+  "Add the tomatoes and cook them down until jammy.",
+  "Stir the base into the lentils.",
+  "Make the tadka: hot ghee, seeds, garlic and chilli, until it crackles.",
+  "Pour the tadka over the dahl and cover.",
+  "Squeeze in the lemon, taste for salt, and plate up.",
+];
+$("#ings").innerHTML = INGS.map(i => `<div class="ing"><span>${i[0]}${i[2] ? `<small>${i[2]}</small>` : ""}</span><span>${i[1]}</span></div>`).join("");
+$("#steps").innerHTML = STEPS.map(s => `<li>${s}</li>`).join("");
+
+/* ---------- Conversation ---------- */
+// [what you say, what Sous says, label, current step index or -1]
+const SCRIPT = [
+  ["Hey Sous, what's for dinner?", "Tadka dahl tonight. Or miso salmon, if you want something lighter.", "Friday night", -1],
+  ["Dahl.", "Thirty-five minutes, one pot. Start by rinsing the lentils.", "Tadka dahl · step 1 of 8", 0],
+  ["Done. What's next?", "Rice on. I've set a timer for twelve minutes.", "Tadka dahl · step 2 of 8", 1],
+  ["How long on the rice?", "About two minutes. Keep stirring the tomatoes.", "Tadka dahl · step 4 of 8", 3],
+  ["Plated.", "Enjoy it. Tell me how it tasted, now or tomorrow.", "Tadka dahl · done", 7],
+  ["It was a bit salty.", "Noted. Less salt next time you make it.", "Game plan", 7],
+];
+let line = -1, busy = false;
+let state = "idle"; // idle, listening, thinking, talking
+
+function setText(el, txt) {
+  el.classList.add("fade");
+  setTimeout(() => { el.textContent = txt; el.classList.remove("fade"); }, 350);
+}
+function markStep(i) {
+  document.querySelectorAll("#steps li").forEach((li, k) => li.classList.toggle("now", k === i));
+}
+function talk() {
+  if (busy) return;
+  busy = true;
+  line = (line + 1) % SCRIPT.length;
+  const [you, sou, where, step] = SCRIPT[line];
+  state = "listening";
+  setText($("#said"), "");
+  setText($("#you"), "“" + you + "”");
+  setTimeout(() => { state = "thinking"; }, 1400);
+  setTimeout(() => {
+    state = "talking";
+    setText($("#said"), sou);
+    setText($("#where"), where);
+    markStep(step);
+  }, 2200);
+  const talkFor = 900 + sou.length * 45;
+  setTimeout(() => { state = "idle"; busy = false; }, 2200 + talkFor);
+}
+$("#sou").addEventListener("click", talk);
+$("#sou").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); talk(); } });
+
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll(".pane").forEach(p => p.classList.toggle("on", p.id === b.dataset.tab));
+}));
+
+/* ---------- Orb ---------- */
+const canvas = $("#orb");
+const gl = canvas.getContext("webgl", { antialias: true, premultipliedAlpha: false });
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+if (!gl) { $("#fallback").hidden = false; }
+else {
+  const VS = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
+  const FS = `
+precision highp float;
+uniform vec2 r; uniform float t, amp, think, listen;
+float h(vec3 p){p=fract(p*.3183099+.1);p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
+float n(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.-2.*f);
+ return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+            mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z);}
+float fbm(vec3 p){float s=0.,a=.5;for(int i=0;i<5;i++){s+=a*n(p);p*=2.03;a*=.5;}return s;}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-.5*r)/min(r.x,r.y);
+  uv.y-=.08;
+  // a gas burner seen from slightly above: dark cast-iron cap, ring of blue jets
+  vec2 c=vec2(0.,-.03);
+  float Rx=.27, Ry=.27*.42;
+  vec2 e=(uv-c)/vec2(Rx,Ry);
+  float er=length(e);
+  vec3 col=vec3(0.);
+  // burner body and cap
+  float body=smoothstep(1.12,1.08,length((uv-c-vec2(0.,-.035))/vec2(Rx,Ry)));
+  col+=vec3(.025,.025,.03)*body;
+  float cap=smoothstep(.86,.82,length((uv-c-vec2(0.,.012))/vec2(Rx*.9,Ry*.9)));
+  float capShade=.05+.05*smoothstep(-.6,.8,(uv.y-c.y)/Ry);
+  col=mix(col,vec3(capShade*.9,capShade*.92,capShade*1.05),cap);
+  // the flames
+  float H0=.075+.045*amp+.03*listen;
+  vec3 outer=vec3(.12,.32,1.), inner=vec3(.55,.85,1.), tip=vec3(.55,.35,1.);
+  vec3 fl=vec3(0.);
+  for(int i=0;i<36;i++){
+    float th=float(i)/36.*6.2831853;
+    vec2 base=c+vec2(cos(th)*Rx,sin(th)*Ry);
+    float back=step(0.,sin(th));
+    float flick=n(vec3(float(i)*1.73,t*7.,0.));
+    float wave=sin(th*3.-t*5.)*think*.35;
+    float H=H0*(.8+.45*flick+wave)*(1.+amp*.35*n(vec3(float(i),t*11.,4.)));
+    vec2 dir=normalize(vec2(cos(th)*.35,1.));
+    vec2 per=vec2(dir.y,-dir.x);
+    vec2 p=uv-base;
+    float al=dot(p,dir), ac=dot(p,per)+ (n(vec3(float(i),al*30.,t*6.))-.5)*.006*al/H;
+    float k=clamp(al/H,0.,1.);
+    float w=.0115*(.35+sqrt(k))*(1.-k*k);
+    float s=exp(-ac*ac/(w*w+1e-6))*smoothstep(-.004,.006,al)*(1.-smoothstep(.55,1.,k));
+    float ki=clamp(al/(H*.42),0.,1.);
+    float wi=.006*(.4+sqrt(ki))*(1.-ki);
+    float si=exp(-ac*ac/(wi*wi+1e-6))*smoothstep(-.003,.004,al)*(1.-smoothstep(.6,1.,ki));
+    float dim=mix(1.,.55,back)*(1.-cap*back*.85);
+    vec3 cc=mix(outer,tip,smoothstep(.5,1.,k));
+    fl+=(cc*s*.55+inner*si*1.1)*dim;
+  }
+  col+=fl;
+  // blue light thrown onto the cap and a soft haze around the ring
+  float ring=abs(er-1.);
+  col+=vec3(.1,.25,.9)*exp(-ring*7.)*(.10+.12*amp+.08*listen)*(1.-cap*.3);
+  col+=vec3(.1,.25,.9)*cap*.06*(1.+amp);
+  // gentle tone map so the cores glow white-blue
+  col=1.-exp(-col*1.6);
+  gl_FragColor=vec4(col,1.);
+}`;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) { $("#fallback").hidden = false; }
+  else {
+    gl.useProgram(pr);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(pr, "p");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const U = k => gl.getUniformLocation(pr, k);
+    const uR = U("r"), uT = U("t"), uA = U("amp"), uTh = U("think"), uL = U("listen");
+
+    function size() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      const w = canvas.clientWidth * dpr, h = canvas.clientHeight * dpr;
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
+    }
+    addEventListener("resize", size);
+
+    let amp = 0, think = 0, listen = 0, clock = 0, last = performance.now();
+    function frame(now) {
+      const dt = Math.min((now - last) / 1000, .05); last = now;
+      clock += dt * (reduce ? .25 : 1);
+      // targets per state; talking gets a syllable-like flutter
+      let tA = .04, tTh = 0, tL = 0;
+      if (state === "listening") { tA = .22 + .12 * Math.sin(now / 120) * Math.sin(now / 47); tL = 1; }
+      if (state === "thinking") { tA = .1; tTh = 1; }
+      if (state === "talking") { tA = .45 + .35 * Math.abs(Math.sin(now / 95) * Math.sin(now / 233 + 1)); }
+      const k = 1 - Math.pow(.001, dt);
+      amp += (tA - amp) * k * 1.4; think += (tTh - think) * k; listen += (tL - listen) * k;
+      if (!$("#recipe").classList.contains("on")) {
+        size();
+        gl.uniform2f(uR, canvas.width, canvas.height);
+        gl.uniform1f(uT, clock); gl.uniform1f(uA, Math.max(0, amp)); gl.uniform1f(uTh, think); gl.uniform1f(uL, listen);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+}
+</script>

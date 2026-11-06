@@ -33,6 +33,6 @@ coverage/
 *.iws
 
 # Android
-android/key.properties
+apps/mobile/android/key.properties
 *.jks
 *.keystore
