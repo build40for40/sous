@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'auth/auth_controller.dart';
 import 'services.dart';
+import 'shares/share_receiver.dart';
 import 'ui/flame.dart';
 import 'ui/home.dart';
 
@@ -11,6 +12,7 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final services = SousServices();
   unawaited(services.auth.restore());
+  unawaited(services.startSharing(SystemShareReceiver()));
   runApp(MainApp(services: services));
 }
 
