@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UserBrain } from "./brain";
+import { readDigest } from "./digest";
 import { SCHEMA_VERSION } from "./schema";
 import { demoRecipe } from "./seed";
 import { fakeReflection, mockClaude } from "./testing";
@@ -147,6 +148,36 @@ describe("UserBrain", () => {
   it("won't start a session for a recipe it doesn't have", async () => {
     await runInDurableObject(brainFor("user_norecipe"), (brain: UserBrain) => {
       expect(brain.createSession("nope")).toBeNull();
+    });
+  });
+
+  describe("deleting a recipe", () => {
+    it("takes its cooks out of history and the suggest digest, and a pending reflection for them is skipped", async () => {
+      const stub = brainFor("user_deleteCascade");
+      await runInDurableObject(stub, async (brain: UserBrain, state) => {
+        const recipe = brain.listRecipes()[0];
+        const done = brain.createSession(recipe.id!)!.id;
+        await brain.endSession(done, { rating: 5 });
+        mockClaude({ content: [{ type: "text", text: JSON.stringify(fakeReflection) }] });
+        await brain.alarm();
+        const pending = brain.createSession(recipe.id!)!.id;
+        await brain.endSession(pending, {});
+        expect(brain.listHistory()).toHaveLength(2);
+        expect(readDigest(state.storage.sql, brain.getProfile(), new Date()).candidates.map((c) => c.title)).toContain(recipe.title);
+
+        expect(brain.deleteRecipe(recipe.id!)).toBe(true);
+        expect(brain.deleteRecipe(recipe.id!)).toBe(false);
+        expect(brain.listHistory()).toEqual([]);
+        expect(brain.getSession(done)).toBeNull();
+        expect(readDigest(state.storage.sql, brain.getProfile(), new Date()).candidates).toEqual([]);
+        expect(state.storage.sql.exec("SELECT path FROM files ORDER BY path").toArray()).toEqual([{ path: "USER.md" }]);
+        expect(brain.getProfile().learned).toContain("Hates coriander");
+
+        const claude = mockClaude();
+        await brain.alarm();
+        expect(claude.requests).toHaveLength(0);
+        expect(brain.getSession(pending)).toBeNull();
+      });
     });
   });
 

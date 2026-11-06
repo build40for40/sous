@@ -14,11 +14,11 @@ Everything lives under `/sous/api/v1` and needs a WorkOS access token as `Author
 | `GET /recipes` | `{recipes}`, newest first |
 | `POST /recipes` | a recipe that validates against `packages/contracts`. The brain sets `id`, `slug`, `created_at` and `updated_at`, ignoring any sent. `201` with the saved recipe, or `400 {"error": "invalid_recipe", issues}` |
 | `GET /recipes/:id` | one recipe, or `404` |
-| `DELETE /recipes/:id` | `204`, or `404` |
+| `DELETE /recipes/:id` | deletes the recipe and everything that only exists because of it (see "Deleting a recipe"). `204`, or `404` |
 | `POST /sessions` | `{recipe_id}`. Starts a live cooking session: `201 {id, recipe_id, stage, started_at, opening_line}`, or `404` for an unknown recipe |
 | `POST /sessions/:id/turns` | a `TurnRequest` from `packages/contracts`. Streams Sou's reply as server-sent events (`text`, `tool_call`, then `done` or `error`). `409 tool_results_required` lists the tool call ids still owed, `409 session_ended`, `409 turn_in_progress` |
 | `POST /sessions/:id/end` | `{rating?, notes?}` (rating 1 to 5, notes up to 4,000 characters; the body can be empty). Closes the session and queues its reflection: `202 {id, ended_at, rating?, notes?, reflection_status: "pending"}`. `409 session_ended`, `409 turn_in_progress`, `404` |
-| `GET /history` | `{cooks}`: every finished cook, newest first (up to 200), each `{session_id, recipe_id, recipe_title, started_at, ended_at, date, rating, summary, reflection_status}`. A plain SQL read, no model call. `date` is the London day, `rating` is the cook's own or the reflection's read of it (null if neither), `recipe_title` is null if the recipe has since been deleted |
+| `GET /history` | `{cooks}`: every finished cook, newest first (up to 200), each `{session_id, recipe_id, recipe_title, started_at, ended_at, date, rating, summary, reflection_status}`. A plain SQL read, no model call. `date` is the London day, `rating` is the cook's own or the reflection's read of it (null if neither), `recipe_title` is null for a cook whose recipe row is missing |
 | `GET /suggest` | "what should I cook?": `{suggestions}`, up to five `{recipe_id, title, reason}`, best first, only from the user's saved recipes. `503 suggestions_unavailable` without the Anthropic key, `502 suggestions_failed` if Claude is down or its answer is unusable (safe to retry) |
 | `GET /sessions/:id` | `{session, reflection, reflection_status, reflected_at}`. `session` is a contract `Session` (the transcript, facts, rating and notes); `reflection` is null until it's done. `reflection_status` is `not_ended`, `pending`, `done` or `failed` |
 
@@ -42,6 +42,17 @@ A turn is saved only once the reply finishes, so after an `error` event the cook
 Every per-cook line carries the session's `[[wikilink]]`, and a rerun replaces that session's lines rather than adding more, so reflecting twice changes nothing. After writing, `links` is rebuilt from every note's `[[wikilinks]]` (`src/wikilinks.ts`), with the link's `kind` taken from the folder it points into. The next `POST /sessions` for that recipe picks all of it up through context assembly.
 
 If Claude is down or rate limited the alarm throws and Cloudflare retries it with backoff; a later `/end` also picks up anything still pending. A refusal or output that doesn't fit the schema won't improve on retry, so it's saved as `reflection_error` and the session shows `failed`. Each reflection logs a `sous_reflection` line with its timing and token usage.
+
+## Deleting a recipe
+
+`DELETE /recipes/:id` runs in one transaction (`deleteRecipeCascade` in `src/vault.ts`) and removes:
+
+- the recipe row and its `recipes/<slug>.md` note
+- every session of that recipe, ended or not, and each one's `sessions/...md` note
+- the per-cook lines those sessions added under `## Cooked in` in ingredient, technique and cuisine notes. A note left with no cooks is deleted; one other recipes still use stays, minus those lines
+- the `links` table is then rebuilt
+
+`USER.md` keeps everything under `## Learned while cooking`, since those are facts about the cook. Only the `([[sessions/...]])` provenance link on each line is dropped, as its note is gone. So the recipe disappears from `/history`, `/suggest` and live-cooking context. A pending reflection alarm only reads sessions that still exist, and one already running when the delete lands saves nothing.
 
 ## History and suggestions
 

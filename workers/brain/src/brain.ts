@@ -14,7 +14,7 @@ import { demoRecipe, starterAbout, starterPreferences } from "./seed";
 import { suggest, SUGGEST_MODEL, type Suggestion } from "./suggest";
 import { appendTurnRequest, requestTurns, sse, type NewSession, type SessionRow } from "./sessions";
 import { runTurn, type TurnOutcome } from "./turn";
-import { replaceAbout, splitLearned, writeReflection } from "./vault";
+import { deleteRecipeCascade, replaceAbout, splitLearned, writeReflection } from "./vault";
 
 interface NoteRow extends Record<string, SqlStorageValue> {
   path: string;
@@ -118,7 +118,12 @@ export class UserBrain extends DurableObject<Env> {
 
   deleteRecipe(id: string): boolean {
     this.init();
-    return this.sql.exec("DELETE FROM recipes WHERE id = ?", id).rowsWritten > 0;
+    return this.ctx.storage.transactionSync(() => {
+      const row = this.sql.exec<RecipeRow>("SELECT * FROM recipes WHERE id = ?", id).toArray()[0];
+      if (!row) return false;
+      deleteRecipeCascade(this.sql, row);
+      return true;
+    });
   }
 
   createSession(recipeId: string): NewSession | null {
