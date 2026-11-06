@@ -84,9 +84,9 @@ export const reflectionSchema = {
 
 const validator = new Validator(reflectionSchema as unknown as Schema, "2020-12", false);
 
-export const REFLECTION_PROMPT = `You are the memory of Sou, a sous chef who lives in a home cook's phone and talks them through recipes out loud. A cook has just finished. Read what happened and file it away, so the next time this cook is in the kitchen Sou remembers what matters.
+export const REFLECTION_PROMPT = `You are the memory of Sous, a sous chef who lives in a home cook's phone and talks them through recipes out loud. A cook has just finished. Read what happened and file it away, so the next time this cook is in the kitchen Sous remembers what matters.
 
-You get the recipe, the cook's profile (USER.md), the full transcript between the cook and Sou, the facts Sou noted during the cook, and the cook's own rating and notes if they gave any.
+You get the recipe, the cook's profile (USER.md), the full transcript between the cook and Sous, the facts Sous noted during the cook, and the cook's own rating and notes if they gave any.
 
 - Only record what the transcript, facts or the cook's notes support. Never invent outcomes, swaps or preferences.
 - The cook's own rating and notes outrank anything you infer.
@@ -130,7 +130,7 @@ export function renderInput({ recipe, user, turns, facts, rating, notes }: Refle
     section("The recipe", recipeJson),
     section("USER.md", [`Preferences: ${JSON.stringify(user.preferences)}`, user.about.trim()].filter(Boolean).join("\n\n")),
     section("Transcript", renderTranscript(turns) || "Nothing was said."),
-    section("Facts Sou noted", facts.length ? facts.map((f) => `- ${f}`).join("\n") : "None."),
+    section("Facts Sous noted", facts.length ? facts.map((f) => `- ${f}`).join("\n") : "None."),
     section("The cook's rating", rating ? `${rating} out of 5` : "Not given."),
     section("The cook's notes", notes ?? "None."),
   ].join("\n\n");
@@ -141,7 +141,7 @@ export function renderTranscript(turns: Turn[]): string {
     .flatMap((turn) => {
       if (turn.role === "cook") return [`Cook: ${turn.text}`];
       if (turn.role === "sous") {
-        return [...(turn.text ? [`Sou: ${turn.text}`] : []), ...(turn.tool_calls ?? []).map((c) => `(Sou used ${c.name} ${JSON.stringify(c.input)})`)];
+        return [...(turn.text ? [`Sous: ${turn.text}`] : []), ...(turn.tool_calls ?? []).map((c) => `(Sous used ${c.name} ${JSON.stringify(c.input)})`)];
       }
       return [];
     })
