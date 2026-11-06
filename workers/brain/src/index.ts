@@ -1,6 +1,7 @@
 import { BASE_PATH, error, HttpError, json, readJson } from "./http";
 import { parseProfilePatch } from "./profile";
 import { validateRecipe } from "./recipes";
+import { parseEndRequest } from "./reflection";
 import { parseNewSession, parseTurnRequest } from "./sessions";
 import { authenticate, deleteWorkosUser } from "./workos";
 
@@ -13,7 +14,7 @@ const MAX_TURN_BYTES = 32 * 1024;
 
 // The generated stub types recurse too deeply on JSON preferences, so the stub is typed from the class directly.
 type Rpc<T> = { [K in keyof T]: T[K] extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never };
-type Brain = Rpc<Pick<UserBrain, "getProfile" | "updateProfile" | "wipe" | "listRecipes" | "getRecipe" | "createRecipe" | "deleteRecipe" | "createSession" | "takeTurn">>;
+type Brain = Rpc<Pick<UserBrain, "getProfile" | "updateProfile" | "wipe" | "listRecipes" | "getRecipe" | "createRecipe" | "deleteRecipe" | "createSession" | "takeTurn" | "endSession" | "getSession">>;
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -74,11 +75,24 @@ async function route(request: Request, path: string, userId: string, brain: Brai
     return session ? json(session, 201) : error(404, "recipe_not_found");
   }
 
-  const sessionId = path.match(/^\/sessions\/([A-Za-z0-9-]+)\/turns$/)?.[1];
-  if (sessionId) {
-    if (method !== "POST") return methodNotAllowed("POST");
-    if (!env.ANTHROPIC_API_KEY) return error(503, "live_sessions_unavailable");
-    return brain.takeTurn(sessionId, parseTurnRequest(await readJson(request, MAX_TURN_BYTES)));
+  const sessionMatch = path.match(/^\/sessions\/([A-Za-z0-9-]+)(?:\/(turns|end))?$/);
+  if (sessionMatch) {
+    const [, sessionId, action] = sessionMatch;
+    if (action === "turns") {
+      if (method !== "POST") return methodNotAllowed("POST");
+      if (!env.ANTHROPIC_API_KEY) return error(503, "live_sessions_unavailable");
+      return brain.takeTurn(sessionId, parseTurnRequest(await readJson(request, MAX_TURN_BYTES)));
+    }
+    if (action === "end") {
+      if (method !== "POST") return methodNotAllowed("POST");
+      const body = request.body && request.headers.get("Content-Length") !== "0" ? await readJson(request, MAX_BODY_BYTES) : {};
+      const ended = await brain.endSession(sessionId, parseEndRequest(body));
+      if (typeof ended === "string") return error(ended === "session_not_found" ? 404 : 409, ended);
+      return json(ended, 202);
+    }
+    if (method !== "GET") return methodNotAllowed("GET");
+    const session = await brain.getSession(sessionId);
+    return session ? json(session) : error(404, "session_not_found");
   }
 
   return error(404, "not_found");

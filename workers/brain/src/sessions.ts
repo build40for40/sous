@@ -14,6 +14,11 @@ export interface SessionRow extends Record<string, SqlStorageValue> {
   facts: string;
   started_at: string;
   ended_at: string | null;
+  rating: number | null;
+  notes: string | null;
+  reflected_at: string | null;
+  reflection: string | null;
+  reflection_error: string | null;
 }
 
 export interface NewSession {

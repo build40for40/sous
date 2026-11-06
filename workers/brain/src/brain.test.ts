@@ -1,9 +1,14 @@
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UserBrain } from "./brain";
 import { SCHEMA_VERSION } from "./schema";
 import { demoRecipe } from "./seed";
+import { fakeReflection, mockClaude } from "./testing";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const brainFor = (name: string) => env.USER_BRAIN.get(env.USER_BRAIN.idFromName(name));
 
@@ -65,7 +70,7 @@ describe("UserBrain", () => {
     await runInDurableObject(brainFor("user_columns"), (brain: UserBrain, state) => {
       brain.listRecipes();
       const columns = state.storage.sql.exec<{ name: string }>("PRAGMA table_info(sessions)").toArray().map((c) => c.name);
-      expect(columns).toEqual(expect.arrayContaining(["model", "context", "turns", "facts"]));
+      expect(columns).toEqual(expect.arrayContaining(["model", "context", "turns", "facts", "rating", "notes", "reflection_error"]));
     });
   });
 
@@ -108,6 +113,53 @@ describe("UserBrain", () => {
   it("won't start a session for a recipe it doesn't have", async () => {
     await runInDurableObject(brainFor("user_norecipe"), (brain: UserBrain) => {
       expect(brain.createSession("nope")).toBeNull();
+    });
+  });
+
+  describe("reflection alarm", () => {
+    const reflectionReply = { content: [{ type: "text" as const, text: JSON.stringify(fakeReflection) }] };
+
+    async function endedSession(brain: UserBrain, state: DurableObjectState) {
+      const id = brain.createSession(brain.listRecipes()[0].id!)!.id;
+      expect(await brain.endSession(id, { rating: 4 })).toMatchObject({ id, rating: 4, reflection_status: "pending" });
+      expect(await state.storage.getAlarm()).toEqual(expect.any(Number));
+      return id;
+    }
+
+    it("retries later when Claude is down, then reflects once", async () => {
+      const stub = brainFor("user_alarmRetry");
+      await runInDurableObject(stub, async (brain: UserBrain, state) => {
+        const id = await endedSession(brain, state);
+        const claude = mockClaude({ status: 529, message: "overloaded" }, { status: 529, message: "overloaded" }, reflectionReply);
+        await expect(brain.alarm()).rejects.toThrow("will be retried");
+        expect(brain.getSession(id)).toMatchObject({ reflection_status: "pending", reflection: null });
+
+        await brain.alarm();
+        expect(claude.requests).toHaveLength(3);
+        expect(brain.getSession(id)).toMatchObject({ reflection_status: "done", reflection: { rating: 4 } });
+        const notes = state.storage.sql.exec("SELECT COUNT(*) AS n FROM files WHERE kind = 'session'").one().n;
+
+        await brain.alarm();
+        expect(claude.requests).toHaveLength(3);
+        expect(state.storage.sql.exec("SELECT COUNT(*) AS n FROM files WHERE kind = 'session'").one().n).toBe(notes);
+      });
+      await runDurableObjectAlarm(stub);
+    });
+
+    it("gives up on a reflection that can never work, and carries on with the rest", async () => {
+      const stub = brainFor("user_alarmRefusal");
+      await runInDurableObject(stub, async (brain: UserBrain, state) => {
+        const refused = await endedSession(brain, state);
+        const fine = await endedSession(brain, state);
+        const claude = mockClaude({ content: [{ type: "text", text: "No." }], stop_reason: "refusal" }, reflectionReply);
+        await brain.alarm();
+        expect(brain.getSession(refused)).toMatchObject({ reflection_status: "failed", reflection: null });
+        expect(brain.getSession(fine)).toMatchObject({ reflection_status: "done" });
+
+        await brain.alarm();
+        expect(claude.requests).toHaveLength(2);
+      });
+      await runDurableObjectAlarm(stub);
     });
   });
 });

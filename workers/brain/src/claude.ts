@@ -9,11 +9,11 @@ export function liveModel(env: Pick<Env, "SOUS_LIVE_MODEL">): string {
   return env.SOUS_LIVE_MODEL?.trim() || DEFAULT_LIVE_MODEL;
 }
 
-export function createClient(apiKey: string): Anthropic {
+export function createClient(apiKey: string, timeout = 60_000): Anthropic {
   return new Anthropic({
     apiKey,
     maxRetries: 1,
-    timeout: 60_000,
+    timeout,
     fetch: (input, init) => fetch(input, init),
   });
 }
