@@ -1,0 +1,25 @@
+{
+  "name": "@sous/brain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Sous brain: a Worker in front of one UserBrain Durable Object per user.",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run wrangler -- dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types --env-interface Env",
+    "wrangler": "env -u CLOUDFLARE_API_KEY -u CLOUDFLARE_EMAIL wrangler --profile 40for40"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.6",
+    "@sous/contracts": "file:../../packages/contracts",
+    "jose": "^6.2.15"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.6.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.158.0"
+  }
+}
