@@ -105,6 +105,15 @@ class CookingSession {
     required this._tools,
     DateTime Function()? clock,
     this.maxToolRounds = 8,
+    this.busyRetryDelays = const [
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 500),
+      Duration(seconds: 1),
+      Duration(seconds: 1),
+      Duration(seconds: 2),
+      Duration(seconds: 2),
+      Duration(seconds: 3),
+    ],
   }) : _clock = clock ?? DateTime.now;
 
   final BrainClient _brain;
@@ -114,10 +123,19 @@ class CookingSession {
   /// Stops a reply that keeps asking for tools from looping forever.
   final int maxToolRounds;
 
+  /// How long to wait between tries while the brain is still finishing a
+  /// reply that [interrupt] cut off.
+  final List<Duration> busyRetryDelays;
+
   final _states = StreamController<CookingState>.broadcast();
   final _replyText = StreamController<String>.broadcast();
   CookingState _state = const CookingState();
   List<ToolResult> _owed = const [];
+  StreamSubscription<StreamEvent>? _reply;
+  Completer<Object?>? _replyDone;
+  List<ToolCall> _heldCalls = const [];
+  var _generation = 0;
+  var _stopAfterTools = false;
 
   CookingState get state => _state;
 
@@ -153,6 +171,10 @@ class CookingSession {
 
   /// Sends what the cook said, plus any tool results still owed from a turn
   /// that didn't get through, and plays out Sou's whole reply.
+  ///
+  /// When the brain is still finishing a reply that [interrupt] cut off, or
+  /// disagrees about which tool results are owed, this waits or fixes the
+  /// results and tries again, so the cook's words aren't lost.
   Future<void> say(String text) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) throw ArgumentError.value(text, 'text', 'is empty');
@@ -160,6 +182,38 @@ class CookingSession {
       throw StateError('Sou is busy (${_state.phase.name})');
     }
     return _converse(TurnRequest(text: trimmed, toolResults: _owed));
+  }
+
+  /// Cuts Sou's reply off, for when the cook talks over Sou or taps to stop.
+  ///
+  /// A reply still streaming stops at once and the session is ready for the
+  /// cook again. Tool calls in it that never ran go back to Sou as skipped. If
+  /// Sou's tools are already running they finish first, and their results go
+  /// with whatever the cook says next. Does nothing when Sou isn't replying.
+  void interrupt() {
+    switch (_state.phase) {
+      case CookingPhase.thinking || CookingPhase.replying:
+        _generation++;
+        unawaited(_reply?.cancel());
+        _reply = null;
+        final cut = _replyDone;
+        _replyDone = null;
+        if (cut != null && !cut.isCompleted) cut.complete(null);
+        _owed = [
+          for (final call in _heldCalls)
+            ToolResult(
+              toolCallId: call.id,
+              content: 'Skipped: the cook interrupted before this ran.',
+              isError: true,
+            ),
+        ];
+        _heldCalls = const [];
+        _emit(_state.copyWith(phase: CookingPhase.ready, clearError: true));
+      case CookingPhase.runningTools:
+        _stopAfterTools = true;
+      default:
+        break;
+    }
   }
 
   /// Ends the cook with an optional rating (1 to 5) and notes. Sou reflects on
@@ -190,9 +244,11 @@ class CookingSession {
   }
 
   Future<void> _converse(TurnRequest first) async {
+    final generation = _generation;
+    _stopAfterTools = false;
     var request = first;
     for (var round = 0; ; round++) {
-      final calls = await _turn(request);
+      final calls = await _send(request, generation);
       if (calls == null) return;
       if (calls.isEmpty || round >= maxToolRounds) {
         _emit(_state.copyWith(phase: CookingPhase.ready));
@@ -207,14 +263,54 @@ class CookingSession {
         if (!result.isError) _reflect(call);
       }
       _owed = results;
+      if (_stopAfterTools) {
+        _stopAfterTools = false;
+        _emit(_state.copyWith(phase: CookingPhase.ready));
+        return;
+      }
       request = TurnRequest(toolResults: results);
     }
   }
 
+  /// [_turn], retried when the brain turns the request away before replying:
+  /// still busy with a reply the cook cut off, or owed different tool results.
+  Future<List<ToolCall>?> _send(TurnRequest first, int generation) async {
+    var request = first;
+    var busyTries = 0;
+    var fixedResults = false;
+    while (true) {
+      final outcome = await _turn(request, generation);
+      if (outcome is! _Rejected) return outcome as List<ToolCall>?;
+      final e = outcome.error;
+      if (e.error == BrainError.turnInProgress &&
+          busyTries < busyRetryDelays.length) {
+        await Future<void>.delayed(busyRetryDelays[busyTries++]);
+        if (generation != _generation) return null;
+        continue;
+      }
+      if (!fixedResults && request.text != null) {
+        if (e.error == BrainError.toolResultsRequired) {
+          fixedResults = true;
+          _owe(e.toolCallIds);
+          request = TurnRequest(text: request.text, toolResults: _owed);
+          continue;
+        }
+        if (e.code == 'unexpected_tool_results') {
+          fixedResults = true;
+          _owed = const [];
+          request = TurnRequest(text: request.text);
+          continue;
+        }
+      }
+      return _interrupted(e);
+    }
+  }
+
   /// Streams one turn. Returns the client tool calls owed when the reply
-  /// stopped for tools, an empty list when it simply finished, or null when
-  /// the turn didn't get through.
-  Future<List<ToolCall>?> _turn(TurnRequest request) async {
+  /// stopped for tools, an empty list when it simply finished, null when the
+  /// turn didn't get through or was interrupted, or [_Rejected] when the brain
+  /// refused it before replying.
+  Future<Object?> _turn(TurnRequest request, int generation) async {
     _emit(
       _state.copyWith(
         phase: CookingPhase.thinking,
@@ -224,79 +320,118 @@ class CookingSession {
     );
     final sentAt = _clock().toUtc();
     final calls = <ToolCall>[];
+    _heldCalls = calls;
     final text = StringBuffer(request.text == null ? _state.reply : '');
     final replyStart = text.length;
     var needsSpace = text.isNotEmpty && !_state.reply.endsWith(' ');
+    var heard = false;
+    final done = Completer<Object?>();
+    _replyDone = done;
 
-    try {
-      await for (final event in _brain.takeTurn(_state.sessionId!, request)) {
-        switch (event) {
-          case TextEvent(:final delta):
-            if (needsSpace && delta.isNotEmpty) {
-              text.write(' ');
-              needsSpace = false;
-            }
-            text.write(delta);
-            if (!_replyText.isClosed) _replyText.add(delta);
-            _emit(
-              _state.copyWith(
-                phase: CookingPhase.replying,
-                reply: text.toString(),
-              ),
-            );
-          case ToolCallEvent(:final toolCall):
-            calls.add(toolCall);
-          case DoneEvent(:final stopReason):
-            _owed = const [];
-            final said = text.toString().substring(replyStart).trimLeft();
-            _emit(
-              _state.copyWith(
-                transcript: [
-                  ..._state.transcript,
-                  if (request.toolResults.isNotEmpty)
-                    ToolTurn(sentAt, request.toolResults),
-                  if (request.text != null) CookTurn(sentAt, request.text!),
-                  if (said.isNotEmpty || calls.isNotEmpty)
-                    SousTurn(
-                      _clock().toUtc(),
-                      text: said.isEmpty ? null : said,
-                      toolCalls: List.unmodifiable(calls),
-                    ),
-                ],
-              ),
-            );
-            return stopReason == StopReason.toolUse ? calls : const [];
-          case ErrorEvent(:final message):
-            return _interrupted(
-              BrainException(
-                BrainError.retryable,
-                code: 'turn_failed',
-                details: {'message': message},
-              ),
-            );
-        }
-      }
-      return _interrupted(
-        const BrainException(BrainError.network, code: 'stream_ended'),
-      );
-    } on BrainException catch (e) {
-      return _interrupted(e);
+    void finish(Object? outcome) {
+      if (done.isCompleted) return;
+      done.complete(outcome);
+      unawaited(_reply?.cancel());
     }
+
+    _reply = _brain
+        .takeTurn(_state.sessionId!, request)
+        .listen(
+          (event) {
+            if (done.isCompleted) return;
+            heard = true;
+            switch (event) {
+              case TextEvent(:final delta):
+                if (needsSpace && delta.isNotEmpty) {
+                  text.write(' ');
+                  needsSpace = false;
+                }
+                text.write(delta);
+                if (!_replyText.isClosed) _replyText.add(delta);
+                _emit(
+                  _state.copyWith(
+                    phase: CookingPhase.replying,
+                    reply: text.toString(),
+                  ),
+                );
+              case ToolCallEvent(:final toolCall):
+                calls.add(toolCall);
+              case DoneEvent(:final stopReason):
+                _owed = const [];
+                final said = text.toString().substring(replyStart).trimLeft();
+                _emit(
+                  _state.copyWith(
+                    transcript: [
+                      ..._state.transcript,
+                      if (request.toolResults.isNotEmpty)
+                        ToolTurn(sentAt, request.toolResults),
+                      if (request.text != null) CookTurn(sentAt, request.text!),
+                      if (said.isNotEmpty || calls.isNotEmpty)
+                        SousTurn(
+                          _clock().toUtc(),
+                          text: said.isEmpty ? null : said,
+                          toolCalls: List.unmodifiable(calls),
+                        ),
+                    ],
+                  ),
+                );
+                finish(
+                  stopReason == StopReason.toolUse ? calls : const <ToolCall>[],
+                );
+              case ErrorEvent(:final message):
+                finish(
+                  _interrupted(
+                    BrainException(
+                      BrainError.retryable,
+                      code: 'turn_failed',
+                      details: {'message': message},
+                    ),
+                  ),
+                );
+            }
+          },
+          onError: (Object e, StackTrace stack) {
+            if (done.isCompleted) return;
+            if (e is BrainException) {
+              finish(heard ? _interrupted(e) : _Rejected(e));
+            } else {
+              done.completeError(e, stack);
+            }
+          },
+          onDone: () {
+            if (done.isCompleted) return;
+            finish(
+              _interrupted(
+                const BrainException(BrainError.network, code: 'stream_ended'),
+              ),
+            );
+          },
+        );
+
+    final outcome = await done.future;
+    if (generation == _generation) {
+      _reply = null;
+      _replyDone = null;
+      _heldCalls = const [];
+    }
+    return outcome;
+  }
+
+  void _owe(List<String> ids) {
+    final have = {for (final r in _owed) r.toolCallId: r};
+    _owed = [
+      for (final id in ids)
+        have[id] ??
+            ToolResult(
+              toolCallId: id,
+              content: 'The phone lost track of this one.',
+              isError: true,
+            ),
+    ];
   }
 
   Null _interrupted(BrainException e) {
-    if (e.error == BrainError.toolResultsRequired) {
-      final have = {for (final r in _owed) r.toolCallId: r};
-      _owed = [
-        for (final id in e.toolCallIds)
-          have[id] ??
-              ToolResult(
-                toolCallId: id,
-                content: 'The phone lost track of this one.',
-                isError: true,
-              ),
-      ];
-    }
+    if (e.error == BrainError.toolResultsRequired) _owe(e.toolCallIds);
     final over = e.error == BrainError.sessionEnded;
     _emit(
       _state.copyWith(
@@ -329,4 +464,11 @@ class CookingSession {
     await _states.close();
     await _replyText.close();
   }
+}
+
+/// The brain turned a request away before replying to it.
+class _Rejected {
+  const _Rejected(this.error);
+
+  final BrainException error;
 }

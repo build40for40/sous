@@ -8,13 +8,17 @@ environment:
   flutter: 3.47.9
 
 dependencies:
+  archive: ^4.6.0
+  audioplayers: ^6.8.1
   crypto: ^3.0.8
   flutter:
     sdk: flutter
   flutter_secure_storage: ^11.2.0
   flutter_web_auth_2: ^5.1.0
   http: ^1.6.0
-
+  path_provider: ^2.1.6
+  record: ^7.1.2
+  sherpa_onnx: ^2.0.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
