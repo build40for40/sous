@@ -40,5 +40,6 @@ dart format .                     # format
 - `.github/workflows/build.yml` runs on merges to `main` that touch `apps/mobile/` or the workflow itself (or manually): release APK + AAB and an unsigned iOS `Runner.app`, uploaded as workflow artifacts for 30 days. The build number is the workflow run number.
 - `.github/workflows/contracts.yml` runs on PRs and pushes to `main` that touch `packages/contracts/` or the workflow itself: typecheck and tests. See `packages/contracts/README.md`.
 - `.github/workflows/brain.yml` runs on PRs and pushes to `main` that touch `workers/brain/`, `packages/contracts/` or the workflow itself: typecheck and tests. See `workers/brain/README.md`.
+- `.github/workflows/brain-deploy.yml` deploys `workers/brain` to build40for40.com/sous/api on pushes to `main` that touch `workers/brain/`, `packages/contracts/` or the workflow itself (or manually). See `workers/brain/README.md`.
 
 Signing and store upload aren't wired yet. That checklist lives on the Superthread `day5` board ("Publish Sous to the App Store and Google Play").
