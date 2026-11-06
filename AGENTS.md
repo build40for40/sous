@@ -13,7 +13,7 @@ I have thousands of recipes saved on Instagram that I always want to try, but I 
 
 ## What we're building
 
-Sous ("Hey, Sou") is a screen-free sous chef: an audio companion on your phone for home cooks who want the creativity back in cooking. Sou talks you through a recipe you saved on Instagram, so your hands can stay messy and your eyes stay on the food.
+Sous ("Hey Sous") is a screen-free sous chef: an audio companion on your phone for home cooks who want the creativity back in cooking. Sous talks you through a recipe you saved on Instagram, so your hands can stay messy and your eyes stay on the food.
 
 The cook moves through five states in a loop: decide, prep (mise en place), cook, present, feedback, then back to decide.
 
@@ -31,13 +31,14 @@ The recipe format links extraction to the brain, and the session format links th
 
 UX decisions from Lawrence, who owns the app:
 
+- The app and the assistant are both called Sous, as in sous chef. People may say it like "Sue", and that's fine, but it's never written "Sou".
 - The screen stays awake for the whole cooking session and goes back to normal when the session ends.
 - The app's background is mostly black, to save battery and so the phone sits quietly on the counter.
 - Hands-free works with a wake word, "Hey Sous" (as in sous chef). It's said like "Hey Sue", so it should also respond to close variants such as "Hey Sue" and "Hey Sue Chef".
 - The recipe picker is a numbered list, so the cook can choose by voice ("Hey Sous, number three"). It shows one hint of what to say.
-- Sou's face on the cook screen is a burner: a ring of gas flame on black. The flame shows Sou's state: low while waiting, rising while listening, flickering while thinking, and surging while talking.
-- Several timers can run at once, each named after what's cooking ("rice", "dahl"). Sou sets them by voice, and the app runs them, so they keep working if the brain drops out. They stack under the burner, change colour as they get close, and show on the lock screen.
-- "Game plan" is the name for Sou planning the cook with you, which is separate from prep (mise en place). A retro after the cook, which you can also add to later, such as the next day from the sofa ("it was too salty"), is a stretch goal.
+- The face of Sous on the cook screen is a burner: a ring of gas flame on black. The flame shows what Sous is doing: low while waiting, rising while listening, flickering while thinking, and surging while talking.
+- Several timers can run at once, each named after what's cooking ("rice", "dahl"). Sous sets them by voice, and the app runs them, so they keep working if the brain drops out. They stack under the burner, change colour as they get close, and show on the lock screen.
+- "Game plan" is the name for Sous planning the cook with you, which is separate from prep (mise en place). A retro after the cook, which you can also add to later, such as the next day from the sofa ("it was too salty"), is a stretch goal.
 
 ## Still open
 
