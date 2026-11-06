@@ -1,6 +1,6 @@
 # Sous
 
-Day 5 of 40 for 40: get recipes out of Instagram and into a phone app you can cook from. Flutter app for iOS and Android. Right now it's an empty scaffold.
+Day 5 of 40 for 40: a screen-free sous chef that talks you through the recipes you saved on Instagram. Flutter app for iOS and Android. Right now it's an empty scaffold.
 
 ## Setup
 
