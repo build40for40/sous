@@ -30,7 +30,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 /* Sous */
 #sou { cursor: pointer; }
 .label { font-size: 13px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--grey); text-align: center; transition: opacity .4s; }
-.caption { margin-top: auto; text-align: center; display: grid; gap: 10px; justify-items: center; min-height: 128px; align-content: end; }
+.caption { position: absolute; left: max(28px, env(safe-area-inset-left, 0px)); right: max(28px, env(safe-area-inset-right, 0px)); top: 68%; text-align: center; display: grid; gap: 8px; justify-items: center; }
 .you { font-size: 16px; color: var(--grey); min-height: 1.3em; transition: opacity .35s; }
 .said { font-size: 22px; font-weight: 500; letter-spacing: -.015em; line-height: 1.3; max-width: 22ch; text-wrap: balance; min-height: 2.6em; transition: opacity .35s; }
 .fade { opacity: 0; }
@@ -246,6 +246,13 @@ $("#linkForm").addEventListener("submit", e => {
 
 renderSaved(); renderRecipe();
 
+// Keep Sous's words just under the flame, whatever the screen size
+function placeCaption() {
+  const app = document.querySelector(".app"), w = app.clientWidth, h = app.clientHeight;
+  document.querySelector(".caption").style.top = Math.min(h / 2 + 0.27 * Math.min(w, h), h - 170) + "px";
+}
+addEventListener("resize", placeCaption); placeCaption();
+
 /* ---------- Conversation ---------- */
 // [what you say, what Sous says, label, current step index or -1]
 const SCRIPT = [
@@ -254,12 +261,35 @@ const SCRIPT = [
   ["Done. What's next?", "Rice on. I've set a timer for twelve minutes.", "Tadka dahl · step 2 of 8", 1],
   ["", "Chef, the rice is ready when you are.", "Tadka dahl · step 3 of 8", 2, "notice"],
   ["Heard. How long on the tomatoes?", "About two more minutes. Keep stirring.", "Tadka dahl · step 4 of 8", 3],
-  ["", "Chef, the ghee is smoking. Take it off the heat now.", "Tadka dahl · step 6 of 8", 5, "urgent"],
+  ["", "Chef! Tadka timer. Off the heat now.", "Tadka dahl · step 6 of 8", 5, "urgent"],
   ["Heard.", "Good. Back on low, then add the seeds.", "Tadka dahl · step 6 of 8", 5],
   ["Plated.", "Enjoy it. Tell me how it tasted, now or tomorrow.", "Tadka dahl · done", 7],
   ["It was a bit salty.", "Noted. Less salt next time you make it.", "Game plan", 7],
 ];
 let line = -1, busy = false;
+
+/* ---------- Sounds ---------- */
+// Heads-up: one soft chime. Alarm: a two-tone beep every 0.9 s that gets louder until "Heard".
+let ac = null, alarmTimer = null, alarmBeats = 0, lastBeat = 0;
+function audio() { try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === "suspended") ac.resume(); } catch (_) {} return ac; }
+function tone(freq, start, dur, vol, type = "sine") {
+  const a = audio(); if (!a) return;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0, a.currentTime + start);
+  g.gain.linearRampToValueAtTime(vol, a.currentTime + start + .015);
+  g.gain.exponentialRampToValueAtTime(.0001, a.currentTime + start + dur);
+  o.connect(g).connect(a.destination); o.start(a.currentTime + start); o.stop(a.currentTime + start + dur + .05);
+}
+function chime() { tone(784, 0, .9, .18); tone(1175, .14, 1.1, .12); }
+function beat() {
+  const v = Math.min(.5, .2 + alarmBeats * .03);
+  tone(988, 0, .16, v, "square"); tone(740, .2, .16, v, "square");
+  alarmBeats++; lastBeat = performance.now();
+  if (navigator.vibrate) try { navigator.vibrate(200); } catch (_) {}
+}
+function startAlarm() { stopAlarm(); alarmBeats = 0; beat(); alarmTimer = setInterval(beat, 900); }
+function stopAlarm() { if (alarmTimer) clearInterval(alarmTimer); alarmTimer = null; }
 let state = "idle", alertLevel = ""; // idle, listening, thinking, talking
 
 function setText(el, txt) {
@@ -279,12 +309,22 @@ function talk() {
   if (level) {
     // Sous starts the turn: the ring changes colour first, then it speaks
     alertLevel = level;
-    setText($("#you"), level === "urgent" ? "Urgent" : "Sous needs you");
+    if (level === "urgent") {
+      // keeps going, ring and sound, until the cook says "Heard"
+      startAlarm();
+      setText($("#you"), "Say “Heard” to stop");
+      setTimeout(() => { state = "talking"; setText($("#said"), sou); setText($("#where"), where); markStep(step); }, 600);
+      setTimeout(() => { state = "idle"; busy = false; }, 600 + talkFor);
+      return;
+    }
+    chime();
+    setText($("#you"), "Heads up");
     setTimeout(() => { state = "talking"; setText($("#said"), sou); setText($("#where"), where); markStep(step); }, 1500);
     setTimeout(() => { state = "idle"; busy = false; }, 1500 + talkFor);
     setTimeout(() => { if (SCRIPT[line] && SCRIPT[line][4] === level) alertLevel = ""; }, 1500 + talkFor + 2500);
     return;
   }
+  stopAlarm();
   alertLevel = "";
   state = "listening";
   setText($("#you"), "“" + you + "”");
@@ -335,9 +375,9 @@ void main(){
   float I=fall*jets*(.55+.75*tb2)*(1.+.2*listen+.45*amp);
   float rimLine=exp(-abs(d+.002)*170.)*(.75+.4*amp+.3*listen);
   I+=rimLine*.7;
-  // blue normally; orange-red when Sous needs you; red when it's urgent
+  // blue normally; orange for a heads-up; red for an alarm that repeats until you say "Heard"
   vec3 cD=vec3(.02,.035,.17), cM=vec3(.09,.28,.85), cH=vec3(.62,.84,1.);
-  cD=mix(cD,vec3(.16,.04,.01),warm); cM=mix(cM,vec3(1.,.27,.05),warm); cH=mix(cH,vec3(1.,.62,.4),warm);
+  cD=mix(cD,vec3(.17,.07,.01),warm); cM=mix(cM,vec3(1.,.48,.06),warm); cH=mix(cH,vec3(1.,.78,.42),warm);
   cD=mix(cD,vec3(.2,.01,.01),urgent); cM=mix(cM,vec3(.95,.08,.05),urgent); cH=mix(cH,vec3(1.,.55,.48),urgent);
   vec3 col=cD*smoothstep(0.,.25,I)+cM*smoothstep(.12,.75,I)+cH*smoothstep(.65,1.4,I);
   // the iron cap, catching blue light at its edge
@@ -388,11 +428,11 @@ void main(){
       if (state === "thinking") { tA = .1 + .12 * (.5 + .5 * Math.sin(now / 420)); }
       if (state === "talking") { tA = .18 + .2 * (.5 + .5 * Math.sin(now / 240)); }
       const k = 1 - Math.pow(.001, dt);
-      if (alertLevel === "urgent") tA = Math.max(tA, .3 + .12 * Math.sin(now / 380));
+      if (alertLevel === "urgent") tA = Math.max(tA, .2 + .6 * Math.exp(-(now - lastBeat) / 160));
       if (alertLevel === "notice") tA = Math.max(tA, .2 + .05 * Math.sin(now / 700));
       warm += ((alertLevel === "notice" ? 1 : 0) - warm) * k * 1.2;
       urgent += ((alertLevel === "urgent" ? 1 : 0) - urgent) * k * 1.6;
-      amp += (tA - amp) * k * .6; think += (tTh - think) * k; listen += (tL - listen) * k;
+      amp += (tA - amp) * k * .6; if (alertLevel === "urgent") amp = tA; think += (tTh - think) * k; listen += (tL - listen) * k;
       if ($("#sou").classList.contains("on")) {
         size();
         gl.uniform2f(uR, canvas.width, canvas.height);
