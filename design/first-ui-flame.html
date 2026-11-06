@@ -324,15 +324,15 @@ void main(){
   // straight down onto a burner: a dark iron core inside a ring of living blue fire
   float r=length(uv), a=atan(uv.y,uv.x);
   float R=.25;
-  float rot=t*(.02+.22*think);
+  float rot=t*.02;
   vec2 dA=vec2(cos(a+rot),sin(a+rot));
   float d=r-R;
-  float len=.075+.075*amp+.035*listen;
-  float tb=fbm(vec3(dA*2.2,d*8.-t*(.45+.8*amp)));
-  float tb2=fbm(vec3(dA*4.5,d*13.-t*(.8+.9*amp))+1.5*tb);
+  float len=.075+.05*amp+.015*listen;
+  float tb=fbm(vec3(dA*2.2,d*8.-t*.45));
+  float tb2=fbm(vec3(dA*4.5,d*13.-t*.8)+1.5*tb);
   float jets=.84+.16*pow(abs(cos(a*18.)),3.);
   float fall=exp(-max(d,0.)/(len*(.45+1.1*tb2)))*smoothstep(-.012,.003,d);
-  float I=fall*jets*(.55+.75*tb2)*(1.+.5*listen+.35*amp);
+  float I=fall*jets*(.55+.75*tb2)*(1.+.2*listen+.45*amp);
   float rimLine=exp(-abs(d+.002)*170.)*(.75+.4*amp+.3*listen);
   I+=rimLine*.7;
   // blue normally; orange-red when Sous needs you; red when it's urgent
@@ -384,9 +384,9 @@ void main(){
       clock += dt * (reduce ? .25 : 1);
       // targets per state; talking gets a syllable-like flutter
       let tA = .04, tTh = 0, tL = 0;
-      if (state === "listening") { tA = .2 + .05 * Math.sin(now / 320); tL = 1; }
-      if (state === "thinking") { tA = .1; tTh = 1; }
-      if (state === "talking") { tA = .3 + .14 * Math.abs(Math.sin(now / 280) * Math.sin(now / 610 + 1)); }
+      if (state === "listening") { tA = .12 + .22 * (.5 + .5 * Math.sin(now / 280)); tL = 1; }
+      if (state === "thinking") { tA = .1 + .12 * (.5 + .5 * Math.sin(now / 420)); }
+      if (state === "talking") { tA = .18 + .2 * (.5 + .5 * Math.sin(now / 240)); }
       const k = 1 - Math.pow(.001, dt);
       if (alertLevel === "urgent") tA = Math.max(tA, .3 + .12 * Math.sin(now / 380));
       if (alertLevel === "notice") tA = Math.max(tA, .2 + .05 * Math.sin(now / 700));
