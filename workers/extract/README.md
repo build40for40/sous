@@ -37,12 +37,13 @@ Everything lives under `/sous/api/v1/shares` and needs the same WorkOS access to
 
 | route | does |
 | --- | --- |
-| `POST /shares` | `{url}`: whatever the share sheet gave (the text can include words around the link). Instagram tracking (`?igsh=`) is stripped. `202` with the share, `200` with `duplicate: true` if this person already shared that post, `422 unsupported_link`, `429 daily_limit` (`SOUS_DAILY_SHARE_LIMIT` a day), `503 extraction_unavailable` without the Anthropic key |
+| `POST /shares` | `{url}`: whatever the share sheet gave (the text can include words around the link). Instagram tracking (`?igsh=`) is stripped. `202` with the share, `200` with `duplicate: true` if this person already shared that post (unless it came back `needs_screenshot`: sharing it again reads it again), `422 unsupported_link`, `429 daily_limit` (`SOUS_DAILY_SHARE_LIMIT` reads a day), `503 extraction_unavailable` without the Anthropic key |
 | `POST /shares` | `{image: {media_type, data}}`: a screenshot on its own (JPEG, PNG, WebP or GIF, base64, up to 1.9 MB) |
-| `POST /shares/:id/screenshot` | `{image}`: a screenshot for a share that came back `needs_screenshot`. The share starts reading again; the saved recipe keeps the original post's link. `409 share_in_progress` while it's still reading |
+| `POST /shares/:id/screenshot` | `{image}`: a screenshot for a share that came back `needs_screenshot`, and only then. The share starts reading again; the saved recipe keeps the original post's link. Counts toward the daily limit. `409 share_in_progress` while it's still reading, `409 screenshot_not_needed` for any other status (so a saved share never gets a second recipe), `429 daily_limit` |
 | `GET /shares` | `{shares}`, newest first (up to 500) |
 | `GET /shares/:id` | one share, or `404` |
 | `DELETE /shares/:id` | forgets the share. A recipe it saved stays in the brain (`DELETE /recipes/:id` there) |
+| `DELETE /shares` | forgets every share this person made: their part of account deletion. **The app calls it before the brain's `DELETE /me`**, which deletes the WorkOS user (after that the token no longer works here). `204` |
 
 A share:
 
@@ -76,7 +77,9 @@ The app polls `GET /shares/:id` (or the list) while a share is `reading`.
 3. One `claude-opus-5-5` call (`src/extract.ts`: effort `medium`, structured output, refusal fallback `"default"`). Claude picks the best source, writes the contract recipe without inventing anything, or says honestly why there isn't one. Code drops empty fields and checks the result against `packages/contracts`. A "recipe" with no ingredients or no steps becomes `needs_screenshot` instead.
 4. Every waiting user's `ShareInbox` gets the result; recipes are saved with the brain's `UserBrain.createRecipe` over a cross-script Durable Object binding (`USER_BRAIN`, `script_name: sous-brain`), so they appear in `GET /recipes` like any other.
 
-Retries: Instagram or a site answering 429/5xx, and Claude 408/409/429/5xx, are retried on the alarm after 10 s, 1 min, 5 min and 30 min. After five attempts the share becomes `needs_screenshot`. A post that's private or deleted, or a refusal, isn't retried. Each extraction logs a `sous_extract` line with its timing, status and token usage; failures log `sous_extract_error`.
+Retries: Instagram or a site answering 429/5xx, and Claude 408/409/429/5xx, are retried on the alarm after 10 s, 1 min, 5 min and 30 min. After five attempts the share becomes `needs_screenshot`. A post that's private or deleted, or a refusal, isn't retried.
+
+What gets cached: only a complete read plus a Claude answer, which every later sharer gets straight away. A failure (retries used up, a refusal, a post that looked private, which is also how a login wall looks, or a linked recipe page that wouldn't open) is delivered to the people waiting and then forgotten, so the next share of that post reads it afresh. A screenshot that couldn't be read isn't kept. Each extraction logs a `sous_extract` line with its timing, status and token usage; failures log `sous_extract_error`.
 
 ## Reading from Cloudflare (tested 6 Nov)
 
@@ -95,7 +98,7 @@ What that doesn't prove: behaviour at volume (Instagram may rate limit a busy Wo
 
 - `WORKOS_CLIENT_ID` (var): the shared AuthKit application, same as the brain.
 - `SOUS_EXTRACT_MODEL` (var): `claude-opus-5-5`.
-- `SOUS_DAILY_SHARE_LIMIT` (var): shares per user per 24 hours, `50`.
+- `SOUS_DAILY_SHARE_LIMIT` (var): reads per user per 24 hours, `50`. A read is a new share, a re-share that reads again, or a screenshot.
 - `ANTHROPIC_API_KEY` (secret): the same org secret as the brain. Without it `POST /shares` returns `503`.
 
 ## Commands

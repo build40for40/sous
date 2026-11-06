@@ -16,7 +16,7 @@ const MAX_SCREENSHOT_BODY = Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 16 * 1024;
 const IMAGE_TYPES = new Set<ImageType>(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 type Rpc<T> = { [K in keyof T]: T[K] extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never };
-type Inbox = Rpc<Pick<ShareInbox, "addShare" | "attachScreenshot" | "list" | "get" | "remove" | "complete">>;
+type Inbox = Rpc<Pick<ShareInbox, "addShare" | "attachScreenshot" | "list" | "get" | "remove" | "complete" | "wipe">>;
 type Post = Rpc<Pick<PostExtraction, "request">>;
 
 export default {
@@ -42,7 +42,12 @@ async function route(request: Request, path: string, userId: string, inbox: Inbo
 
   if (path === "" || path === "/") {
     if (method === "GET") return json({ shares: await inbox.list() });
-    if (method !== "POST") return methodNotAllowed("GET, POST");
+    if (method === "DELETE") {
+      // Account deletion: the app calls this before the brain's DELETE /me.
+      await inbox.wipe();
+      return new Response(null, { status: 204 });
+    }
+    if (method !== "POST") return methodNotAllowed("GET, POST, DELETE");
     if (!env.ANTHROPIC_API_KEY) return error(503, "extraction_unavailable");
     const body = await readJson(request, MAX_SCREENSHOT_BODY);
     if (!isPlainObject(body)) throw new HttpError(400, "invalid_share", { message: "Send {url} or {image: {media_type, data}}." });
@@ -59,7 +64,7 @@ async function route(request: Request, path: string, userId: string, inbox: Inbo
     if (!env.ANTHROPIC_API_KEY) return error(503, "extraction_unavailable");
     const existing = await inbox.get(shareId);
     if (!existing) return error(404, "share_not_found");
-    if (existing.status === "reading") return error(409, "share_in_progress");
+    if (existing.status !== "needs_screenshot") return error(409, existing.status === "reading" ? "share_in_progress" : "screenshot_not_needed");
     const body = await readJson(request, MAX_SCREENSHOT_BODY);
     if (!isPlainObject(body) || body.image === undefined) throw new HttpError(400, "invalid_share", { message: "Send {image: {media_type, data}}." });
     return shareScreenshot(body.image, existing, userId, inbox, env);
@@ -105,7 +110,11 @@ async function shareScreenshot(image: unknown, existing: Share | null, userId: s
   const key = `img:${await sha256(bytes)}`;
   let share: Share;
   if (existing) {
-    share = (await inbox.attachScreenshot(existing.id, key))!;
+    const attached = await inbox.attachScreenshot(existing.id, key, dailyLimit(env));
+    if (attached === "not_found") return error(404, "share_not_found");
+    if (attached === "daily_limit") return error(429, "daily_limit", { limit: dailyLimit(env) });
+    if (typeof attached === "string") return error(409, attached); // changed status since the check above
+    share = attached;
   } else {
     const added = await inbox.addShare(userId, "screenshot", key, null, dailyLimit(env));
     if (added === "daily_limit") return error(429, "daily_limit", { limit: dailyLimit(env) });

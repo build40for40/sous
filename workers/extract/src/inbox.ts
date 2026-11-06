@@ -60,30 +60,55 @@ export class ShareInbox extends DurableObject<Env> {
       missing TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS shares_post_key ON shares (post_key)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    // One row per read that might cost a Claude call: a new share, a re-share that retries, a screenshot.
+    this.sql.exec("CREATE TABLE IF NOT EXISTS reads (at TEXT NOT NULL)");
     if (userId) this.sql.exec("INSERT OR IGNORE INTO meta VALUES ('user_id', ?)", userId);
   }
 
-  /** Saves a share, or returns the existing one if this person already shared the same post. */
+  /** Counts a read toward the daily limit, or says the limit is reached. */
+  private allow(dailyLimit: number): boolean {
+    const now = Date.now();
+    this.sql.exec("DELETE FROM reads WHERE at < ?", new Date(now - 48 * 3600_000).toISOString());
+    const today = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM reads WHERE at > ?", new Date(now - 24 * 3600_000).toISOString()).one().n;
+    if (today >= dailyLimit) return false;
+    this.sql.exec("INSERT INTO reads VALUES (?)", new Date(now).toISOString());
+    return true;
+  }
+
+  /**
+   * Saves a share, or returns the existing one if this person already shared the same post.
+   * Sharing again a post that came back needs_screenshot reads it again, since the reason
+   * may have been temporary (Instagram having a bad day, a post that was private).
+   */
   addShare(userId: string, kind: Share["kind"], postKey: string, url: string | null, dailyLimit: number): { share: Share; duplicate: boolean } | "daily_limit" {
     this.init(userId);
     const existing = this.sql.exec<ShareRow>("SELECT * FROM shares WHERE post_key = ? ORDER BY created_at DESC LIMIT 1", postKey).toArray()[0];
-    if (existing) return { share: toShare(existing), duplicate: true };
-    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
-    const today = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM shares WHERE created_at > ?", since).one().n;
-    if (today >= dailyLimit) return "daily_limit";
+    if (existing && existing.status !== "needs_screenshot") return { share: toShare(existing), duplicate: true };
+    if (!this.allow(dailyLimit)) return "daily_limit";
     const now = new Date().toISOString();
+    if (existing) {
+      this.sql.exec("UPDATE shares SET status = 'reading', reason = NULL, updated_at = ? WHERE id = ?", now, existing.id);
+      return { share: this.get(existing.id)!, duplicate: false };
+    }
     const id = crypto.randomUUID();
     this.sql.exec("INSERT INTO shares (id, kind, post_key, url, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'reading', ?, ?)", id, kind, postKey, url, now, now);
     return { share: this.get(id)!, duplicate: false };
   }
 
-  /** A screenshot for a share that needed one: the share starts reading again from the image. */
-  attachScreenshot(shareId: string, postKey: string): Share | null {
+  /**
+   * A screenshot for a share that came back needs_screenshot: the share starts reading again
+   * from the image. Only for that status (a saved share would end up with a second recipe),
+   * and it counts toward the daily limit like any other read.
+   */
+  attachScreenshot(shareId: string, postKey: string, dailyLimit: number): Share | "not_found" | "share_in_progress" | "screenshot_not_needed" | "daily_limit" {
     this.init();
     const row = this.sql.exec<ShareRow>("SELECT * FROM shares WHERE id = ?", shareId).toArray()[0];
-    if (!row) return null;
+    if (!row) return "not_found";
+    if (row.status === "reading") return "share_in_progress";
+    if (row.status !== "needs_screenshot") return "screenshot_not_needed";
+    if (!this.allow(dailyLimit)) return "daily_limit";
     this.sql.exec("UPDATE shares SET kind = 'screenshot', post_key = ?, status = 'reading', reason = NULL, updated_at = ? WHERE id = ?", postKey, new Date().toISOString(), shareId);
-    return this.get(shareId);
+    return this.get(shareId)!;
   }
 
   list(): Share[] {
@@ -103,8 +128,9 @@ export class ShareInbox extends DurableObject<Env> {
     return this.sql.exec("DELETE FROM shares WHERE id = ?", id).rowsWritten > 0;
   }
 
-  wipe(): void {
-    this.ctx.storage.deleteAll();
+  /** Deletes everything Sous holds about this person's shares (for account deletion). */
+  async wipe(): Promise<void> {
+    await this.ctx.storage.deleteAll();
   }
 
   /** Called by the post's Durable Object (or the request itself, for a cached post) when its result is ready. */
