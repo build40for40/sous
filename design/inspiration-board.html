@@ -1,0 +1,387 @@
+<title>Sous Inspiration Board</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a pass-rail of "tickets" in three zones (kitchen, headless, far afield), then three phone sketches that map the ideas to our screens */
+:root {
+  --bg: #EDF0EB;
+  --paper: #FAFBF8;
+  --ink: #18221D;
+  --muted: #5A665F;
+  --rule: #CDD5CF;
+  --basil: #2E6A4E;
+  --basil-soft: #DCE9E1;
+  --saffron: #B9850E;
+  --saffron-soft: #F5E8C6;
+  --late: #B4442F;
+  --display: "Young Serif", Georgia, serif;
+  --body: "Figtree", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121815; --paper: #1A221E; --ink: #E6ECE8; --muted: #9AA8A0; --rule: #2E3A34;
+  --basil: #7CC4A0; --basil-soft: #1F3329; --saffron: #E2B648; --saffron-soft: #3A3018; --late: #E58A74;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121815; --paper: #1A221E; --ink: #E6ECE8; --muted: #9AA8A0; --rule: #2E3A34;
+  --basil: #7CC4A0; --basil-soft: #1F3329; --saffron: #E2B648; --saffron-soft: #3A3018; --late: #E58A74;
+  color-scheme: dark }
+
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 56px; }
+
+header { display: grid; gap: 12px; max-width: 720px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 6vw, 56px); line-height: 1.05; margin: 0; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--basil); }
+.lede { font-size: 17px; color: var(--muted); margin: 0; max-width: 62ch; }
+
+.zone { display: grid; gap: 20px; }
+.zone-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; border-bottom: 2px solid var(--ink); padding-bottom: 10px; }
+.zone-head h2 { font-family: var(--display); font-weight: 400; font-size: 28px; margin: 0; }
+.zone-head p { margin: 0; color: var(--muted); font-size: 14px; }
+
+.rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.ticket { background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 16px 16px 14px; display: grid; gap: 10px; align-content: start; position: relative; min-width: 0; }
+.ticket::before { content: ""; position: absolute; left: 12px; right: 12px; top: -1px; border-top: 2px dashed var(--rule); }
+.t-top { display: flex; justify-content: space-between; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.ticket h3 { font-size: 18px; font-weight: 700; margin: 0; line-height: 1.25; }
+.ticket p { margin: 0; font-size: 14px; color: var(--muted); }
+.steal { background: var(--basil-soft); border-radius: 3px; padding: 9px 11px; font-size: 14px; color: var(--ink); }
+.steal b { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--basil); display: block; margin-bottom: 2px; }
+.screens { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--rule); color: var(--muted); }
+.chip.cook { border-color: var(--basil); color: var(--basil); }
+.chip.pick { border-color: var(--saffron); color: var(--saffron); }
+.chip.prefs { border-color: var(--late); color: var(--late); }
+.ticket a { color: var(--muted); font-size: 12px; font-family: var(--mono); text-decoration-color: var(--rule); text-underline-offset: 3px; overflow-wrap: anywhere; }
+.ticket a:hover, .ticket a:focus-visible { color: var(--basil); }
+a:focus-visible { outline: 2px solid var(--basil); outline-offset: 2px; }
+
+/* Synthesis phones */
+.phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 28px; }
+.phone-col { display: grid; gap: 14px; justify-items: center; min-width: 0; }
+.phone { width: 100%; max-width: 250px; aspect-ratio: 9 / 18.5; background: var(--paper); border: 2px solid var(--ink); border-radius: 30px; padding: 30px 18px 18px; display: flex; flex-direction: column; gap: 10px; position: relative; overflow: hidden; }
+.phone::before { content: ""; position: absolute; top: 9px; left: 50%; transform: translateX(-50%); width: 70px; height: 14px; border-radius: 99px; background: var(--ink); }
+.ph-label { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.ph-title { font-family: var(--display); font-size: 20px; line-height: 1.15; }
+.list { display: grid; gap: 0; font-size: 13px; }
+.list div { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+.list span { font-family: var(--mono); color: var(--saffron); font-weight: 600; }
+.say { margin-top: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: center; border: 1px dashed var(--rule); border-radius: 99px; padding: 6px; }
+.flags { display: flex; flex-wrap: wrap; gap: 6px; }
+.flag { font-size: 12px; padding: 4px 9px; border-radius: 3px; background: var(--saffron-soft); color: var(--ink); }
+.flag.no { background: transparent; border: 1px solid var(--late); color: var(--late); }
+.quote { font-size: 13px; font-style: italic; color: var(--muted); border-left: 2px solid var(--basil); padding-left: 10px; }
+.orb-wrap { flex: 1; display: grid; place-items: center; }
+.orb { width: 110px; height: 110px; border-radius: 50%; background: radial-gradient(circle at 38% 35%, var(--basil-soft), var(--basil)); animation: breathe 4s ease-in-out infinite; }
+@keyframes breathe { 0%,100% { transform: scale(.92); opacity: .85 } 50% { transform: scale(1.04); opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .orb, .face * { animation: none !important } }
+
+/* Sous's face: food alternatives to the orb. Tiles are always black, because the app is. */
+.faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+.face-card { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.face { background: #0A0A09; aspect-ratio: 1; max-width: 100%; border-radius: 6px; position: relative; overflow: hidden; display: grid; place-items: center; }
+.face-card h3 { margin: 0; font-size: 17px; font-weight: 700; }
+.face-card p { margin: 0; font-size: 14px; color: var(--muted); }
+.states { font-family: var(--mono); font-size: 11.5px; color: var(--muted); display: grid; gap: 2px; }
+.states b { color: var(--ink); font-weight: 600; }
+.pick-badge { justify-self: start; font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; background: var(--saffron-soft); color: var(--ink); padding: 2px 8px; border-radius: 99px; }
+
+/* 1 burner */
+.burner { width: 62%; aspect-ratio: 1; border-radius: 50%; position: relative; }
+.burner::before { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: repeating-conic-gradient(#4C8DFF 0 5deg, #A9C9FF 5deg 6deg, transparent 6deg 12deg);
+  -webkit-mask: radial-gradient(circle, transparent 54%, #000 56%, #000 68%, transparent 74%);
+          mask: radial-gradient(circle, transparent 54%, #000 56%, #000 68%, transparent 74%);
+  filter: drop-shadow(0 0 10px #2F6BFF); animation: flicker 1.6s ease-in-out infinite; }
+.burner::after { content: ""; position: absolute; inset: 30%; border-radius: 50%; background: #1A1A18; border: 2px solid #2A2A27; }
+@keyframes flicker { 0%,100% { transform: scale(1) rotate(0deg); opacity: .85 } 40% { transform: scale(1.04) rotate(2deg); opacity: 1 } 70% { transform: scale(.98) rotate(-1deg); opacity: .9 } }
+
+/* 2 simmer */
+.pan { width: 72%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 45% 40%, #B8361E, #7A1F10 70%); border: 6px solid #2C2C29; position: relative; overflow: hidden; }
+.pan i { position: absolute; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #F6B9A6, #D9573A 60%, transparent 70%); animation: bubble 2.4s ease-in infinite; opacity: 0; }
+.pan i:nth-child(1) { width: 14%; height: 14%; left: 22%; top: 30%; animation-delay: 0s }
+.pan i:nth-child(2) { width: 9%; height: 9%; left: 58%; top: 22%; animation-delay: .5s }
+.pan i:nth-child(3) { width: 12%; height: 12%; left: 46%; top: 56%; animation-delay: 1.1s }
+.pan i:nth-child(4) { width: 7%; height: 7%; left: 70%; top: 60%; animation-delay: 1.6s }
+.pan i:nth-child(5) { width: 10%; height: 10%; left: 28%; top: 66%; animation-delay: 2s }
+@keyframes bubble { 0% { transform: scale(.2); opacity: 0 } 50% { opacity: .95 } 85% { transform: scale(1.1); opacity: .9 } 100% { transform: scale(1.4); opacity: 0 } }
+
+/* 3 egg yolk */
+.egg { width: 70%; aspect-ratio: 1; background: #F1EEE6; border-radius: 52% 48% 44% 56% / 50% 56% 44% 50%; display: grid; place-items: center; animation: wobble 5s ease-in-out infinite; }
+.yolk { width: 46%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 36% 32%, #FFE9A3 0 8%, #F7B21B 30%, #E08A06 80%); box-shadow: 0 2px 10px rgba(224,138,6,.45); animation: jiggle 2.2s ease-in-out infinite; }
+@keyframes wobble { 0%,100% { border-radius: 52% 48% 44% 56% / 50% 56% 44% 50% } 50% { border-radius: 46% 54% 52% 48% / 56% 46% 54% 44% } }
+@keyframes jiggle { 0%,100% { transform: scale(1) } 30% { transform: scale(1.05, .96) } 60% { transform: scale(.97, 1.03) } }
+
+/* 4 ingredient constellation */
+.orbit { width: 70%; aspect-ratio: 1; position: relative; animation: spin 18s linear infinite; }
+.orbit i { position: absolute; left: 50%; top: 50%; width: 15%; aspect-ratio: 1; margin: -7.5% 0 0 -7.5%; border-radius: 50%; transform: rotate(var(--a)) translateY(-170%); animation: pulse 2.6s ease-in-out infinite; animation-delay: var(--d); }
+.orbit i:nth-child(1) { background: #E0412B; --a: 0deg; --d: 0s }
+.orbit i:nth-child(2) { background: #3FA35B; --a: 60deg; --d: .3s }
+.orbit i:nth-child(3) { background: #F2B01E; --a: 120deg; --d: .6s }
+.orbit i:nth-child(4) { background: #7B3F8C; --a: 180deg; --d: .9s }
+.orbit i:nth-child(5) { background: #F4E04D; --a: 240deg; --d: 1.2s }
+.orbit i:nth-child(6) { background: #F08A4B; --a: 300deg; --d: 1.5s; opacity: .25 }
+@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes pulse { 0%,100% { filter: brightness(.9) } 50% { filter: brightness(1.25) } }
+
+/* 5 steam */
+.bowl { position: absolute; bottom: 14%; width: 58%; height: 20%; border-radius: 0 0 50% 50% / 0 0 100% 100%; background: #2B2B28; }
+.steam { position: absolute; bottom: 32%; width: 58%; height: 50%; }
+.steam i { position: absolute; bottom: 0; width: 16%; height: 60%; border-radius: 50%; background: rgba(240,240,232,.5); filter: blur(9px); animation: rise 3.6s ease-out infinite; opacity: 0; }
+.steam i:nth-child(1) { left: 18% } .steam i:nth-child(2) { left: 42%; animation-delay: 1.2s } .steam i:nth-child(3) { left: 66%; animation-delay: 2.4s }
+@keyframes rise { 0% { transform: translateY(20%) scaleX(.8); opacity: 0 } 30% { opacity: .9 } 100% { transform: translateY(-70%) scaleX(1.5) skewX(12deg); opacity: 0 } }
+
+/* 6 plate */
+.plate { width: 74%; aspect-ratio: 1; border-radius: 50%; background: #ECEAE3; display: grid; place-items: center; box-shadow: inset 0 0 0 7px #DAD7CE; }
+.plate::after { content: ""; width: 66%; aspect-ratio: 1; border-radius: 50%;
+  background: conic-gradient(#E0412B 0 12%, #3FA35B 12% 24%, #F2B01E 24% 36%, #7B3F8C 36% 44%, transparent 44%); }
+.step { font-size: 15px; text-align: center; font-weight: 600; text-wrap: balance; }
+.timers { display: grid; gap: 6px; }
+.timer { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; padding: 6px 9px; border-radius: 3px; border-left: 4px solid var(--basil); background: var(--bg); font-variant-numeric: tabular-nums; }
+.timer.warn { border-left-color: var(--saffron); }
+.phone-caption { font-size: 14px; color: var(--muted); max-width: 30ch; text-align: center; }
+.phone-caption b { color: var(--ink); }
+
+.notes { display: grid; gap: 10px; max-width: 72ch; font-size: 14px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 18px; }
+.notes p { margin: 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Sous · Day 5 · UX research · 6 Nov 2026</div>
+    <h1>What should <em>Hey Sue</em> feel like?</h1>
+    <p class="lede">Inspiration for the three screens: pick a recipe, preferences, and cooking. It comes from cooking apps, from voice-first products where you barely see the screen, and from places home cooks never look. Each ticket ends with the one thing we could take from it.</p>
+  </header>
+
+  <section class="zone" aria-labelledby="z1">
+    <div class="zone-head"><h2 id="z1">In the kitchen</h2><p>Cooking apps and what they get right in cook mode</p></div>
+    <div class="rail">
+      <article class="ticket">
+        <div class="t-top"><span>Cooking app</span><span>01</span></div>
+        <h3>StepChef</h3>
+        <p>You say "Next step" or "Start timer". It finds the timers in the recipe text and runs them on the lock screen.</p>
+        <div class="steal"><b>Take</b>Pull every duration out of the recipe so Sous can offer the timer before you ask.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://apps.apple.com/us/app/stepchef/id6757906313">apps.apple.com · StepChef</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Cooking app</span><span>02</span></div>
+        <h3>BBC Good Food stay-awake</h3>
+        <p>A cook mode that stops the phone sleeping mid-recipe. Small, but it's the complaint everyone has.</p>
+        <div class="steal"><b>Take</b>The phone never locks during a session. Your hands are covered in flour.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://builtformars.com/company/bbc-good-food">builtformars.com · BBC Good Food</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Audio cookbook</span><span>03</span></div>
+        <h3>Olivari Audio Cookbook</h3>
+        <p>A UNIT9 project that turns a cookbook into something you listen to while you cook. It's the closest thing to Sous in spirit.</p>
+        <div class="steal"><b>Take</b>Treat the recipe as a script that's read aloud. Write it for the ear, not the page.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://unit9.com/project/olivari-audio-cookbook">unit9.com · Olivari</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Reality check</span><span>04</span></div>
+        <h3>"Hands-free" usually isn't</h3>
+        <p>A 2021 hands-on test of voice cooking apps found every one still needed a tap on the screen mid-cook. Many 2026 apps claim to be fully hands-free, but most of those claims come from the vendors themselves.</p>
+        <div class="steal"><b>Take</b>Our bar: from "Hey Sue" to plating, the cook never touches the glass.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://medium.com/55-minutes/can-voice-technology-make-you-a-better-cook-82521755a541">medium.com · 55 Minutes</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Cooking app</span><span>05</span></div>
+        <h3>YellChef offline mode</h3>
+        <p>Recipes keep working without a connection. Kitchens often have bad Wi-Fi.</p>
+        <div class="steal"><b>Take</b>Decide what Sous says when the brain can't be reached. "I lost you, the next step is…" is better than silence.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://mwm.ai/apps/yellchef/6769087920">mwm.ai · YellChef</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="zone" aria-labelledby="z2">
+    <div class="zone-head"><h2 id="z2">Headless and voice-first</h2><p>Products where the screen mostly gets out of the way</p></div>
+    <div class="rail">
+      <article class="ticket">
+        <div class="t-top"><span>AI voice</span><span>06</span></div>
+        <h3>ChatGPT voice orb</h3>
+        <p>A breathing orb, like being on a phone call. OpenAI said the aim was for people not to focus on the UI at all. Voice later moved inline into the chat.</p>
+        <div class="steal"><b>Take</b>The cook screen is an orb that shows Sous's state: listening, thinking, talking, waiting on you.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://futurism.com/?p=345568">futurism.com</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Audio coaching</span><span>07</span></div>
+        <h3>Nike Run Club guided runs</h3>
+        <p>One familiar coach's voice in your ear for the whole run. COLLINS gave each run type (Everyday, Speed, Long) its own visual system.</p>
+        <div class="steal"><b>Take</b>Sous is a character, not a reader. Give each recipe type (weeknight, project, bake) its own look.</div>
+        <div class="screens"><span class="chip cook">Cook</span><span class="chip pick">Pick</span></div>
+        <a href="https://wearecollins.com/work/nikerunclub">wearecollins.com · Nike Run Club</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>OS pattern</span><span>08</span></div>
+        <h3>Live Activities and the Dynamic Island</h3>
+        <p>Turn-by-turn directions sit small in the island and expand only when a lane change or exit is coming.</p>
+        <div class="steal"><b>Take</b>The current step and timers live on the lock screen. They grow only when you need to act.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://uxdesign.cc/designing-for-iphone-14-pro-dynamic-island-90ea7f68b71">uxdesign.cc · Dynamic Island</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Voice principle</span><span>09</span></div>
+        <h3>Say it, don't show it</h3>
+        <p>Without buttons, people lose their bearings. Good voice systems number their options and suggest what you can say.</p>
+        <div class="steal"><b>Take</b>Number the recipe list so the cook can say "Hey Sue, number three". Show one hint of what to say.</div>
+        <div class="screens"><span class="chip pick">Pick</span><span class="chip prefs">Prefs</span></div>
+        <a href="https://elite.polito.it/2026-haii-materials/slides/04-conversational-agents.pdf">polito.it · conversational agents</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="zone" aria-labelledby="z3">
+    <div class="zone-head"><h2 id="z3">Far from the kitchen (mostly)</h2><p>Interfaces home cooks never see</p></div>
+    <div class="rail">
+      <article class="ticket">
+        <div class="t-top"><span>Restaurant</span><span>10</span></div>
+        <h3>Kitchen display system at the pass</h3>
+        <p>Tickets change color as they age (fresh, warning, late) and can be read from across the kitchen. Courses are fired on a delay so the whole order lands at the pass together. A cook bumps a ticket to clear it.</p>
+        <div class="steal"><b>Take</b>Sous times each part of the dish so the rice, sauce and protein finish together. Timers age from green to amber.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://vp0.com/blogs/restaurant-kitchen-display-system-kds-ui/">vp0.com · KDS UI</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Aviation</span><span>11</span></div>
+        <h3>The jet cockpit</h3>
+        <p>Amber Case points out that a cockpit is very complex, but laid out so pilots take it in from the corner of their eye. They only look straight at something when it's wrong.</p>
+        <div class="steal"><b>Take</b>The screen stays quiet and ambient. It speaks up only when something needs you, like the pan being about to burn.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://www.calmtech.institute/post/calm-design-for-critical-situations">calmtech.institute</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Ambient audio</span><span>12</span></div>
+        <h3>Endel</h3>
+        <p>A plain black-and-white interface with a slowly changing animation for each soundscape. It's designed to be there without you really noticing it.</p>
+        <div class="steal"><b>Take</b>Each recipe gets its own slowly drifting visual, so the phone on the counter feels like part of the kitchen.</div>
+        <div class="screens"><span class="chip cook">Cook</span></div>
+        <a href="https://apple.com/newsroom/2021/05/endel-app-creator-on-the-power-of-endless-ambient-music/">apple.com · Endel</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Minimal phone</span><span>13</span></div>
+        <h3>Light Phone III</h3>
+        <p>Menus are plain text in one color, with no icons and a physical scroll wheel. Reviewers love the calm, though some found it frustratingly sparse.</p>
+        <div class="steal"><b>Take</b>The recipe picker could be a plain typographic list instead of a grid of Instagram thumbnails.</div>
+        <div class="screens"><span class="chip pick">Pick</span></div>
+        <a href="https://www.engadget.com/light-phone-iii-review-minimalism-stretched-to-the-point-of-frustration-141559294.html">engadget.com · review</a>
+      </article>
+      <article class="ticket">
+        <div class="t-top"><span>Smart home</span><span>14</span></div>
+        <h3>mui Lab board</h3>
+        <p>A strip of wood on the wall that looks like furniture until you touch it. Then text and icons appear in the grain.</p>
+        <div class="steal"><b>Take</b>This points toward the e-ink or physical device idea from kickoff: Sous as a kitchen object, not an app.</div>
+        <div class="screens"><span class="chip">Later</span></div>
+        <a href="https://www.calmtech.institute/post/calm-design-for-critical-situations">calmtech.institute</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="zone" aria-labelledby="z4">
+    <div class="zone-head"><h2 id="z4">Our three screens, sketched</h2><p>A first pass that combines the tickets above. These are rough ideas, not decisions.</p></div>
+    <div class="phones">
+      <div class="phone-col">
+        <div class="phone" aria-label="Sketch of the recipe picker">
+          <div class="ph-label">Decide</div>
+          <div class="ph-title">What are we cooking tonight?</div>
+          <div class="list">
+            <div><span>1</span>Gochujang butter noodles</div>
+            <div><span>2</span>Crispy chickpea shawarma</div>
+            <div><span>3</span>Miso salmon traybake</div>
+            <div><span>4</span>Burnt-honey halloumi</div>
+          </div>
+          <div class="say">"Hey Sue, number three"</div>
+        </div>
+        <p class="phone-caption"><b>Pick.</b> A plain numbered list (13) you can choose from by voice (09).</p>
+      </div>
+      <div class="phone-col">
+        <div class="phone" aria-label="Sketch of the preferences screen">
+          <div class="ph-label">Preferences</div>
+          <div class="ph-title">What Sous knows about you</div>
+          <div class="flags">
+            <span class="flag">Likes heat</span>
+            <span class="flag">Fewest pans</span>
+            <span class="flag">30 min weeknights</span>
+            <span class="flag no">No coriander</span>
+            <span class="flag no">Peanut allergy</span>
+          </div>
+          <div class="quote">"Last time the salmon was a bit dry. I'll take it off two minutes early."</div>
+          <div class="say">"Hey Sue, I'm vegetarian now"</div>
+        </div>
+        <p class="phone-caption"><b>Preferences.</b> Flags like allergy warnings on a ticket (10), learned in conversation rather than through forms.</p>
+      </div>
+      <div class="phone-col">
+        <div class="phone" aria-label="Sketch of the cooking screen">
+          <div class="ph-label">Cook · step 4 of 9</div>
+          <div class="orb-wrap"><div class="orb"></div></div>
+          <div class="step">Lay the salmon skin-side up and glaze it</div>
+          <div class="timers">
+            <div class="timer"><span>Rice</span><span>06:40</span></div>
+            <div class="timer warn"><span>Tray in oven</span><span>01:15</span></div>
+          </div>
+          <div class="say">Listening for "Hey Sue"</div>
+        </div>
+        <p class="phone-caption"><b>Cook.</b> An orb for Sous's state (06), one step at a time, and timers that age like tickets (10, 11).</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="zone" aria-labelledby="z5">
+    <div class="zone-head"><h2 id="z5">Sous's face, made of food</h2><p>Alternatives to the AI orb, shown on the black background we've decided on. Each has to show four states: waiting, listening, thinking and talking.</p></div>
+    <div class="faces">
+      <div class="face-card">
+        <div class="face" aria-label="A blue gas burner flame ring"><div class="burner"></div></div>
+        <span class="pick-badge">Strong pick</span>
+        <h3>The burner</h3>
+        <p>A ring of blue gas flame, seen from above. It's the most kitchen-native shape there is, and it glows beautifully on black.</p>
+        <div class="states"><span><b>Waiting</b> low pilot flame</span><span><b>Listening</b> flame rises with your voice</span><span><b>Thinking</b> flame flickers around the ring</span><span><b>Talking</b> flame surges as Sous speaks</span></div>
+      </div>
+      <div class="face-card">
+        <div class="face" aria-label="A pan of tomato sauce simmering"><div class="pan"><i></i><i></i><i></i><i></i><i></i></div></div>
+        <h3>The simmer</h3>
+        <p>A pan of sauce from above with bubbles rising and popping. It's warm and alive, and the colour could match the dish you're making.</p>
+        <div class="states"><span><b>Waiting</b> the odd lazy bubble</span><span><b>Listening</b> gentle simmer</span><span><b>Thinking</b> rolling boil</span><span><b>Talking</b> bubbles pop in time with speech</span></div>
+      </div>
+      <div class="face-card">
+        <div class="face" aria-label="A ring of coloured ingredient dots"><div class="orbit"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        <span class="pick-badge">Strong pick</span>
+        <h3>The ingredients</h3>
+        <p>The recipe's own ingredients as coloured dots: tomato, basil, saffron. Every recipe gets a different face, and a dot fades once that ingredient is used.</p>
+        <div class="states"><span><b>Waiting</b> slow drift</span><span><b>Listening</b> dots lean toward the centre</span><span><b>Thinking</b> dots spin faster</span><span><b>Talking</b> dots pulse with speech</span></div>
+      </div>
+      <div class="face-card">
+        <div class="face" aria-label="An egg with a wobbling yolk"><div class="egg"><div class="yolk"></div></div></div>
+        <h3>The yolk</h3>
+        <p>A fried egg whose yolk wobbles. It's playful and instantly reads as food, but it might be too cute for every recipe.</p>
+        <div class="states"><span><b>Waiting</b> still and glossy</span><span><b>Listening</b> yolk leans in</span><span><b>Thinking</b> slow wobble</span><span><b>Talking</b> jiggles with speech</span></div>
+      </div>
+      <div class="face-card">
+        <div class="face" aria-label="Steam rising from a bowl"><div class="steam"><i></i><i></i><i></i></div><div class="bowl"></div></div>
+        <h3>The steam</h3>
+        <p>Wisps rising from a bowl. It's the calmest option and very Endel, but it says less about which state Sous is in.</p>
+        <div class="states"><span><b>Waiting</b> faint wisps</span><span><b>Listening</b> steam bends toward you</span><span><b>Thinking</b> curls and swirls</span><span><b>Talking</b> puffs with each word</span></div>
+      </div>
+      <div class="face-card">
+        <div class="face" aria-label="A plate filling up with colour"><div class="plate"></div></div>
+        <h3>The plate</h3>
+        <p>A plate seen from above that fills with colour as you go. It's a progress bar more than a face, so it could sit alongside one of the others.</p>
+        <div class="states"><span><b>Progress</b> step 4 of 9, plate 44% full</span><span><b>Present</b> full plate, your cue to plate up</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="notes">
+    <p>Sources are linked on each ticket. Most are vendor pages, design write-ups or secondary summaries rather than independent studies, so treat specific claims as directional. The recipe names in the sketches are made up.</p>
+  </div>
+</div>
