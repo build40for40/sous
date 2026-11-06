@@ -3,134 +3,13 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:sous/api/brain_client.dart';
 import 'package:sous/api/brain_exception.dart';
 import 'package:sous/api/session.dart';
 import 'package:sous/cooking/cooking_session.dart';
-import 'package:sous/cooking/cooking_tools.dart';
 
+import '../support/fake_brain.dart';
 import '../support/fakes.dart';
-
-/// A brain that plays scripted replies and enforces the turn rules: results
-/// for every owed tool call come back together, and only those.
-class FakeBrain {
-  final replies = <Object>[];
-  final turns = <Map<String, Object?>>[];
-  Map<String, Object?>? endBody;
-  List<String> owed = [];
-  bool ended = false;
-  http.StreamedResponse Function()? startResponse;
-
-  late final client = MockClient.streaming((request, bodyStream) async {
-    final text = await bodyStream.bytesToString();
-    final body = text.isEmpty
-        ? <String, Object?>{}
-        : jsonDecode(text) as Map<String, Object?>;
-    final path = request.url.path.replaceFirst('/sous/api/v1', '');
-    expect(request.headers['Authorization'], startsWith('Bearer token-'));
-
-    if (path == '/sessions') {
-      return startResponse?.call() ??
-          _json({
-            'id': 'session-fake-1',
-            'recipe_id': body['recipe_id'],
-            'stage': 'decide',
-            'started_at': '2026-11-06T18:00:00Z',
-            'opening_line': 'Right, fake beans on toast. Got everything out?',
-          }, 201);
-    }
-    if (path == '/sessions/session-fake-1/end') {
-      if (ended) return _json({'error': 'session_ended'}, 409);
-      ended = true;
-      endBody = body;
-      return _json({
-        'id': 'session-fake-1',
-        'ended_at': '2026-11-06T18:12:00Z',
-        ...body,
-        'reflection_status': 'pending',
-      }, 202);
-    }
-    if (path == '/sessions/session-fake-1/turns') {
-      if (ended) return _json({'error': 'session_ended'}, 409);
-      final sent = [
-        for (final r in (body['tool_results'] as List? ?? const []))
-          (r as Map)['tool_call_id'] as String,
-      ];
-      if (owed.isNotEmpty &&
-          (sent.length != owed.length || !owed.every(sent.contains))) {
-        return _json({
-          'error': 'tool_results_required',
-          'tool_call_ids': owed,
-        }, 409);
-      }
-      turns.add(body);
-      final reply = replies.removeAt(0);
-      if (reply is http.StreamedResponse) return reply;
-      final events = reply as List<Map<String, Object?>>;
-      final done = events.last;
-      if (done['type'] == 'done') {
-        owed = done['stop_reason'] == 'tool_use'
-            ? [
-                for (final e in events)
-                  if (e['type'] == 'tool_call')
-                    (e['tool_call'] as Map)['id'] as String,
-              ]
-            : [];
-      }
-      return http.StreamedResponse(
-        Stream.fromIterable([
-          for (final e in events) ...utf8.encode(sse(e)).map((b) => [b]),
-        ]),
-        200,
-        headers: {'content-type': 'text/event-stream'},
-      );
-    }
-    fail('Unexpected ${request.method} $path');
-  });
-
-  static http.StreamedResponse _json(Object body, int status) =>
-      http.StreamedResponse(
-        Stream.value(utf8.encode(jsonEncode(body))),
-        status,
-      );
-}
-
-class FakeKitchen implements CookingTools {
-  final log = <String>[];
-  var _timers = 0;
-
-  @override
-  Future<String> startTimer(String label, int seconds) async {
-    log.add('start $label $seconds');
-    return 'timer-${++_timers}';
-  }
-
-  @override
-  Future<void> cancelTimer(String timerId) async => log.add('cancel $timerId');
-
-  @override
-  Future<void> goToStep(int index) async => log.add('step $index');
-
-  @override
-  Future<void> setStage(Stage stage) async => log.add('stage ${stage.name}');
-
-  @override
-  Future<void> show(ShowView view) async => log.add('show ${view.name}');
-}
-
-Map<String, Object?> text(String delta) => {'type': 'text', 'delta': delta};
-
-Map<String, Object?> tool(String id, String name, Map<String, Object?> input) =>
-    {
-      'type': 'tool_call',
-      'tool_call': {'id': id, 'name': name, 'input': input},
-    };
-
-Map<String, Object?> done(String stopReason) => {
-  'type': 'done',
-  'stop_reason': stopReason,
-};
 
 void main() {
   late FakeBrain brain;
@@ -276,10 +155,7 @@ void main() {
     brain.replies.add([text('Where were we?'), done('end_turn')]);
 
     await session.say('Hello?');
-    expect(session.state.phase, CookingPhase.interrupted);
-    expect(session.state.error!.error, BrainError.toolResultsRequired);
-
-    await session.say('Hello?');
+    expect(brain.turns.single['text'], 'Hello?');
     expect(brain.turns.single['tool_results'], [
       {
         'tool_call_id': 't-old',
@@ -352,10 +228,125 @@ void main() {
 
   test('a session that cannot start fails with the reason', () async {
     brain.startResponse = () =>
-        FakeBrain._json({'error': 'live_sessions_unavailable'}, 503);
+        FakeBrain.json({'error': 'live_sessions_unavailable'}, 503);
 
     await session.start('recipe-example-1');
     expect(session.state.phase, CookingPhase.failed);
     expect(session.state.error!.error, BrainError.unavailable);
+  });
+
+  group('interrupt', () {
+    setUp(() {
+      session = CookingSession(
+        brain: brain.brainClient,
+        tools: kitchen,
+        busyRetryDelays: const [Duration.zero, Duration.zero, Duration.zero],
+      );
+    });
+
+    test('cuts a streaming reply off and the next turn waits for the brain '
+        'to finish it', () async {
+      await session.start('recipe-example-1');
+      final slow = SlowReply();
+      brain.replies.add(slow.response);
+
+      final first = session.say('What next?');
+      slow.send(text('First, chop the onions. Then'));
+      await pumpEventQueue();
+      expect(session.state.phase, CookingPhase.replying);
+
+      session.interrupt();
+      expect(session.state.phase, CookingPhase.ready);
+      expect(session.state.canSpeak, isTrue);
+      await first;
+      slow.send(text(' never heard.'));
+      await pumpEventQueue();
+      expect(session.state.reply, 'First, chop the onions. Then');
+
+      brain.busy = 2;
+      brain.replies.add([text('Sure, garlic instead.'), done('end_turn')]);
+      await session.say('Actually, garlic first.');
+
+      expect(brain.turns.last, {'text': 'Actually, garlic first.'});
+      expect(session.state.phase, CookingPhase.ready);
+      expect(session.state.reply, 'Sure, garlic instead.');
+      await slow.close();
+    });
+
+    test('tool calls cut off before they ran go back as skipped', () async {
+      await session.start('recipe-example-1');
+      final slow = SlowReply();
+      brain.replies.add(slow.response);
+
+      final first = session.say('Set a timer.');
+      slow.send(text('Timer on.'));
+      slow.send(tool('t1', 'start_timer', {'label': 'rice', 'seconds': 600}));
+      await pumpEventQueue();
+      session.interrupt();
+      await first;
+      expect(kitchen.log, isEmpty);
+
+      brain.owed = ['t1'];
+      brain.replies.add([text('No timer then.'), done('end_turn')]);
+      await session.say('Never mind.');
+
+      expect(brain.turns.last, {
+        'text': 'Never mind.',
+        'tool_results': [
+          {
+            'tool_call_id': 't1',
+            'content': 'Skipped: the cook interrupted before this ran.',
+            'is_error': true,
+          },
+        ],
+      });
+      await slow.close();
+    });
+
+    test(
+      'while tools run, they finish and their results wait for the cook',
+      () async {
+        await session.start('recipe-example-1');
+        kitchen.gate = Completer<void>();
+        brain.replies.add([
+          tool('t1', 'start_timer', {'label': 'rice', 'seconds': 600}),
+          done('tool_use'),
+        ]);
+
+        final first = session.say('Rice timer please.');
+        await pumpEventQueue();
+        expect(session.state.phase, CookingPhase.runningTools);
+
+        session.interrupt();
+        kitchen.gate!.complete();
+        await first;
+        expect(kitchen.log, ['start rice 600']);
+        expect(brain.turns, hasLength(1));
+        expect(session.state.phase, CookingPhase.ready);
+
+        brain.replies.add([text('Ten minutes, rice.'), done('end_turn')]);
+        await session.say('Thanks.');
+        expect(brain.turns.last, {
+          'text': 'Thanks.',
+          'tool_results': [
+            {'tool_call_id': 't1', 'content': 'timer-1'},
+          ],
+        });
+      },
+    );
+
+    test('does nothing when Sou is not replying', () async {
+      await session.start('recipe-example-1');
+      session.interrupt();
+      expect(session.state.phase, CookingPhase.ready);
+    });
+
+    test('gives up when the brain stays busy', () async {
+      await session.start('recipe-example-1');
+      brain.busy = 10;
+      await session.say('Hello?');
+      expect(session.state.phase, CookingPhase.interrupted);
+      expect(session.state.error!.error, BrainError.turnInProgress);
+    });
   });
 }

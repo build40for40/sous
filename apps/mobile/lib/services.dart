@@ -14,6 +14,7 @@ import 'shares/pending_shares.dart';
 import 'shares/share_inbox.dart';
 import 'shares/share_receiver.dart';
 import 'shares/shares_client.dart';
+import 'voice/voice.dart';
 
 /// Everything the screens and the voice layer need to reach the brain.
 class SousServices {
@@ -22,6 +23,7 @@ class SousServices {
     TokenStore? store,
     AuthBrowser? browser,
     PendingShareStore? pendingShares,
+    Voice? voice,
   }) {
     final client = httpClient ?? http.Client();
     final auth = AuthController(
@@ -48,13 +50,19 @@ class SousServices {
         client: shares,
         store: pendingShares ?? FilePendingShareStore(),
       ),
+      voice ??
+          Voice.fromConfig(VoiceConfig.fromEnvironment(), httpClient: client),
     );
   }
 
-  SousServices._(this.auth, this.brain, this.shares, this.inbox);
+  SousServices._(this.auth, this.brain, this.shares, this.inbox, this.voice);
 
   final AuthController auth;
   final BrainClient brain;
+
+  /// Speech for the cook screen: download the models with [Voice.prepare],
+  /// then `voice.loopFor(session)` gives a loop to start and stop.
+  final Voice voice;
 
   /// `workers/extract`: links and screenshots shared into Sous.
   final SharesClient shares;
