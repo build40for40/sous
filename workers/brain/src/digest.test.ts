@@ -182,6 +182,6 @@ describe("readDigest", () => {
     expect(digest.favourite_ingredients.map((t) => t.name)).toEqual(["miso", "salmon"]);
     expect(digest.avoided_ingredients.map((t) => t.name)).toEqual(["coriander"]);
     expect(digest.techniques_to_practise.map((t) => t.name)).toEqual(["simmering"]);
-    expect(digest.user.about).toContain("Sou fills this in");
+    expect(digest.user.about).toContain("Sous fills this in");
   });
 });

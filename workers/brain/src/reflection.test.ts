@@ -61,9 +61,9 @@ describe("reflectionRequest", () => {
 });
 
 describe("renderTranscript", () => {
-  it("writes the cook and Sou line by line, with Sou's tool calls and without tool results", () => {
+  it("writes the cook and Sous line by line, with Sous's tool calls and without tool results", () => {
     expect(renderTranscript(turns)).toBe(
-      ["Sou: Right then, toastie time.", "Cook: No cheddar, I've got red leicester.", "Sou: That works.", '(Sou used note {"fact":"Hates coriander"})'].join("\n"),
+      ["Sous: Right then, toastie time.", "Cook: No cheddar, I've got red leicester.", "Sous: That works.", '(Sous used note {"fact":"Hates coriander"})'].join("\n"),
     );
   });
 });

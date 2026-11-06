@@ -50,6 +50,7 @@ export async function runTurn({ client, model, context, messages: history, stepC
     const pending = new Map<number, PendingToolUse>();
     const recorded: ToolCall[] = [];
     const serverResults: ToolResult[] = [];
+    const ackIds = new Set<string>();
     let clientCalls = 0;
 
     for await (const event of stream) {
@@ -72,6 +73,9 @@ export async function runTurn({ client, model, context, messages: history, stepC
         const problem = toolCallProblem(call, stepCount);
         if (problem) {
           serverResults.push({ tool_call_id: call.id, content: problem, is_error: true });
+        } else if (call.name === "await_ack") {
+          ackIds.add(call.id);
+          serverResults.push({ tool_call_id: call.id, content: "Waiting for the chef." });
         } else if (call.name === "note") {
           const fact = (call.input as { fact: string }).fact.trim();
           facts.push(fact);
@@ -93,12 +97,15 @@ export async function runTurn({ client, model, context, messages: history, stepC
     if (message.stop_reason === "refusal") throw new TurnError("Claude declined to reply.");
     if (message.stop_reason === "max_tokens") throw new TurnError("The reply ran out of room.");
 
-    messages.push({ role: "assistant", content: message.content as Anthropic.ContentBlockParam[] });
     const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(" ");
+    const timings = () => ({ first_text_ms: firstText, total_ms: Date.now() - started });
+    // The API rejects an empty assistant message, so a silent reply leaves the chef's message open for the next turn to join.
+    if (!text.trim() && !pending.size) return { messages, turns, facts, stage, stopReason: "end_turn", timings: timings(), usage };
+
+    messages.push({ role: "assistant", content: message.content as Anthropic.ContentBlockParam[] });
     const reply = sousTurn(text, recorded, now());
     if (reply) turns.push(reply);
 
-    const timings = () => ({ first_text_ms: firstText, total_ms: Date.now() - started });
     if (message.stop_reason !== "tool_use" || (!clientCalls && !serverResults.length)) {
       return { messages, turns, facts, stage, stopReason: "end_turn", timings: timings(), usage };
     }
@@ -107,9 +114,11 @@ export async function runTurn({ client, model, context, messages: history, stepC
         role: "user",
         content: serverResults.map((r) => ({ type: "tool_result", tool_use_id: r.tool_call_id, content: r.content, ...(r.is_error ? { is_error: true } : {}) })),
       });
-      turns.push({ role: "tool", at: now(), tool_results: serverResults });
+      const shown = serverResults.filter((r) => !ackIds.has(r.tool_call_id));
+      if (shown.length) turns.push({ role: "tool", at: now(), tool_results: shown });
     }
     if (clientCalls) return { messages, turns, facts, stage, stopReason: "tool_use", timings: timings(), usage };
+    if (ackIds.size && !serverResults.some((r) => r.is_error)) return { messages, turns, facts, stage, stopReason: "end_turn", timings: timings(), usage };
   }
   throw new TurnError(`Still calling tools after ${MAX_ROUNDS} rounds.`);
 }

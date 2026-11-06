@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://build40for40.com/sous/schemas/session.schema.json",
   "title": "Session",
-  "description": "One cook of one recipe: the conversation between the cook and Sou, plus the tool calls Sou made along the way. The $defs also hold the /turns request body and the SSE events it streams back.",
+  "description": "One cook of one recipe: the conversation between the cook and Sous, plus the tool calls Sous made along the way. The $defs also hold the /turns request body and the SSE events it streams back.",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "recipe_id", "stage", "started_at", "turns"],
@@ -17,7 +17,7 @@
       "items": { "$ref": "#/$defs/Turn" }
     },
     "facts": {
-      "description": "Everything Sou saved with the note tool, kept for the post-cook reflection.",
+      "description": "Everything Sous saved with the note tool, kept for the post-cook reflection.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
@@ -58,7 +58,7 @@
       }
     },
     "SousTurn": {
-      "description": "Sou's reply: speech-ready text, tool calls, or both.",
+      "description": "Sous's reply: speech-ready text, tool calls, or both.",
       "type": "object",
       "additionalProperties": false,
       "required": ["role", "at"],
@@ -97,7 +97,8 @@
         { "$ref": "#/$defs/GoToStepCall" },
         { "$ref": "#/$defs/SetStageCall" },
         { "$ref": "#/$defs/ShowCall" },
-        { "$ref": "#/$defs/NoteCall" }
+        { "$ref": "#/$defs/NoteCall" },
+        { "$ref": "#/$defs/AwaitAckCall" }
       ]
     },
     "StartTimerCall": {
@@ -203,6 +204,24 @@
         }
       }
     },
+    "AwaitAckCall": {
+      "description": "Run by the brain, which reports it to the app as awaiting_ack on the done event. Kept out of the session's turns.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "input"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "const": "await_ack" },
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["short"],
+          "properties": {
+            "short": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        }
+      }
+    },
     "ToolResult": {
       "description": "Becomes a tool_result block for Claude. start_timer's content is the new timer's id, which cancel_timer takes later.",
       "type": "object",
@@ -215,17 +234,39 @@
       }
     },
     "TurnRequest": {
-      "description": "Body of POST /sessions/:id/turns. Send every result for the last reply's client tool calls together, plus anything the cook said since.",
+      "description": "Body of POST /sessions/:id/turns. Send every result for the last reply's client tool calls together, plus anything the cook said since and anything on the phone that made the flame go red.",
       "type": "object",
       "additionalProperties": false,
-      "anyOf": [{ "required": ["text"] }, { "required": ["tool_results"] }],
+      "anyOf": [{ "required": ["text"] }, { "required": ["tool_results"] }, { "required": ["events"] }],
       "properties": {
         "text": { "type": "string", "minLength": 1 },
         "tool_results": {
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/ToolResult" }
+        },
+        "events": {
+          "description": "What happened on the phone that needs the chef, sent with the turn the chef opens after the flame goes red.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/PhoneEvent" }
         }
+      }
+    },
+    "PhoneEvent": {
+      "description": "Something on the phone that needs the chef. Sous never speaks first, so the app turns the flame red and reports it with the chef's next turn.",
+      "oneOf": [{ "$ref": "#/$defs/TimerFinishedEvent" }]
+    },
+    "TimerFinishedEvent": {
+      "description": "A timer ran out. timer_id is the id the phone returned from start_timer and label is the one Sous gave it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "timer_id", "label"],
+      "properties": {
+        "type": { "const": "timer_finished" },
+        "timer_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 200 }
       }
     },
     "StreamEvent": {
@@ -238,7 +279,7 @@
       ]
     },
     "TextEvent": {
-      "description": "The next chunk of Sou's reply text.",
+      "description": "The next chunk of Sous's reply text.",
       "type": "object",
       "additionalProperties": false,
       "required": ["type", "delta"],
@@ -266,13 +307,23 @@
       }
     },
     "DoneEvent": {
-      "description": "The reply is finished. tool_use means the app owes results for this reply's tool calls in the next TurnRequest.",
+      "description": "The reply is finished. tool_use means the app owes results for this reply's tool calls in the next TurnRequest. awaiting_ack, only ever with end_turn, means the reply ended with an instruction or offer the chef hasn't acknowledged yet.",
       "type": "object",
       "additionalProperties": false,
       "required": ["type", "stop_reason"],
       "properties": {
         "type": { "const": "done" },
-        "stop_reason": { "enum": ["end_turn", "tool_use"] }
+        "stop_reason": { "enum": ["end_turn", "tool_use"] },
+        "awaiting_ack": { "$ref": "#/$defs/AwaitingAck" }
+      }
+    },
+    "AwaitingAck": {
+      "description": "The instruction waiting for \"Heard\". short is what the app repeats aloud, like an alarm clock, until the chef acknowledges it or opens a new turn.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["short"],
+      "properties": {
+        "short": { "type": "string", "minLength": 1 }
       }
     },
     "ErrorEvent": {

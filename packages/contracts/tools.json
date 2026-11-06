@@ -98,5 +98,21 @@
         }
       }
     }
+  },
+  {
+    "name": "await_ack",
+    "description": "Mark the instruction or offer that ends your reply as waiting for the chef to acknowledge it with \"Heard\", \"Yes, Chef\" or an answer. Call it once, last, in any reply that ends with one. If the chef doesn't answer, the phone repeats the short form like an alarm clock until they do.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["short"],
+      "properties": {
+        "short": {
+          "type": "string",
+          "description": "A shorter form of the instruction for the phone to repeat aloud, e.g. \"Chef, rice, twelve minutes. Heard?\" or \"Chef, twelve minute timer for the rice?\". A few words, starting with \"Chef,\". Words only, no digits or symbols. Never empty."
+        }
+      }
+    }
   }
 ]

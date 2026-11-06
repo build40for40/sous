@@ -2,6 +2,7 @@ import type { Recipe } from "@sous/contracts";
 import { describe, expect, it } from "vitest";
 import { assembleContext, openingLine, STAGE_PROMPT, type ContextSources } from "./prompt";
 import { demoRecipe } from "./seed";
+import { PHONE_PREFIX } from "./sessions";
 
 const recipe: Recipe = { ...demoRecipe, id: "recipe-1", slug: "fake-demo-cheese-toastie", created_at: "2026-11-06T12:00:00Z", updated_at: "2026-11-06T12:00:00Z" };
 
@@ -33,11 +34,50 @@ describe("STAGE_PROMPT", () => {
   it("practises what it preaches: no digits", () => {
     expect(STAGE_PROMPT).not.toMatch(/[0-9]/);
   });
+
+  it("is Sous, never Sou, and calls the cook Chef", () => {
+    expect(STAGE_PROMPT).toMatch(/^You are Sous,/);
+    expect(STAGE_PROMPT).not.toMatch(/\bSou\b/);
+    expect(STAGE_PROMPT).toMatch(/always call them "Chef"/);
+  });
+
+  it("gives one instruction per sentence, offers rather than tells, and never says you should", () => {
+    expect(STAGE_PROMPT).toContain("One instruction per sentence");
+    expect(STAGE_PROMPT).toContain('"Chef, the recipe says twelve minutes. Set it?"');
+    expect(STAGE_PROMPT).toMatch(/Never say "you should"/);
+    expect(STAGE_PROMPT.replace(/Never say "you should"/, "")).not.toMatch(/you should/i);
+  });
+
+  it("treats a bare acknowledgement as closing the instruction, and an addition as a new one", () => {
+    for (const ack of ['"Heard"', '"Yes, Chef"', '"Got it"']) expect(STAGE_PROMPT).toContain(ack);
+    expect(STAGE_PROMPT).toMatch(/say nothing at all/);
+    expect(STAGE_PROMPT).toMatch(/"Yep, but make it ten", is a new instruction/);
+  });
+
+  it("asks for await_ack with a short form whenever a reply ends with an instruction or offer", () => {
+    expect(STAGE_PROMPT).toMatch(/call await_ack once, last, with a short form/);
+    expect(STAGE_PROMPT).toContain('"Chef, rice, twelve minutes. Heard?"');
+  });
+
+  it("never speaks first, and leads with what it needs when the phone says why the chef opened a turn", () => {
+    expect(STAGE_PROMPT).toContain("You never speak first.");
+    expect(STAGE_PROMPT).toContain(`"${PHONE_PREFIX}" comes from the phone, not the chef`);
+    expect(STAGE_PROMPT).toMatch(/never cancel it/);
+  });
+
+  it("numbers choices out loud so the chef can pick one by voice", () => {
+    expect(STAGE_PROMPT).toMatch(/number them out loud/);
+    expect(STAGE_PROMPT).toContain('"number two"');
+  });
+
+  it("knows stop words only stop the talking", () => {
+    expect(STAGE_PROMPT).toMatch(/"Hold", "Wait" and "Stop" only mean stop talking\. Never cancel a timer/);
+  });
 });
 
 describe("openingLine", () => {
-  it("names the recipe", () => {
-    expect(openingLine(recipe)).toContain(recipe.title);
+  it("calls the recipe back like a kitchen and offers the ingredients", () => {
+    expect(openingLine(recipe)).toBe(`Heard, Chef. ${recipe.title}. Shall I read you the ingredients first?`);
   });
 });
 

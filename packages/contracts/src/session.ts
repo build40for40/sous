@@ -47,9 +47,19 @@ export interface ToolResult {
   is_error?: boolean;
 }
 
-export type TurnRequest =
-  | { text: string; tool_results?: ToolResult[] }
-  | { text?: string; tool_results: ToolResult[] };
+export type TurnRequest = { text?: string; tool_results?: ToolResult[]; events?: PhoneEvent[] } & (
+  | { text: string }
+  | { tool_results: ToolResult[] }
+  | { events: PhoneEvent[] }
+);
+
+export type PhoneEvent = TimerFinishedEvent;
+
+export interface TimerFinishedEvent {
+  type: "timer_finished";
+  timer_id: string;
+  label: string;
+}
 
 export type StreamEvent = TextEvent | ToolCallEvent | DoneEvent | ErrorEvent;
 
@@ -66,6 +76,11 @@ export interface ToolCallEvent {
 export interface DoneEvent {
   type: "done";
   stop_reason: "end_turn" | "tool_use";
+  awaiting_ack?: AwaitingAck;
+}
+
+export interface AwaitingAck {
+  short: string;
 }
 
 export interface ErrorEvent {
