@@ -255,6 +255,7 @@ void main() {
       text(' at 180°C.'),
       done('end_turn'),
     ]);
+    await loop.openTurn();
     stt.hear('Yes, all out.');
     await pumpEventQueue();
 
@@ -277,6 +278,7 @@ void main() {
       final slow = SlowReply();
       brain.replies.add(slow.response);
 
+      await loop.openTurn();
       stt.hear('What now?');
       await pumpEventQueue();
       expect(loop.state.status, VoiceStatus.thinking);
@@ -324,6 +326,7 @@ void main() {
       await playOut();
       final slow = SlowReply();
       brain.replies.add(slow.response);
+      await loop.openTurn();
       stt.hear('Next step?');
       await pumpEventQueue();
       slow.send(text('Now drain the pasta. Keep a mug of the water. '));
@@ -362,6 +365,7 @@ void main() {
       await playOut();
       final slow = SlowReply();
       brain.replies.add(slow.response);
+      await loop.openTurn();
       stt.hear('Next step?');
       await pumpEventQueue();
       slow.send(text('Now drain the pasta. Keep a mug of the water. '));
@@ -396,6 +400,7 @@ void main() {
       await playOut();
       final slow = SlowReply();
       brain.replies.add(slow.response);
+      await loop.openTurn();
       stt.hear('Next step?');
       await pumpEventQueue();
       slow.send(text('Now drain the pasta. Keep a mug of the water. '));
@@ -429,6 +434,7 @@ void main() {
     await playOut();
     final slow = SlowReply();
     brain.replies.add(slow.response);
+    await loop.openTurn();
     stt.hear('How long for the rice?');
     await pumpEventQueue();
     expect(session.state.phase, CookingPhase.thinking);
@@ -529,15 +535,16 @@ void main() {
       await playOut();
     });
 
-    test('the chef can answer without "Hey Sous" just after Sous '
-        'speaks', () async {
+    test('Sous finishing a reply does not open a turn, so the room can '
+        'never keep the conversation going', () async {
       await loop.start();
       await playOut();
-      brain.replies.add([text('Lovely.'), done('end_turn')]);
-      stt.hear('Yes, all out.');
+      stt.hear('Yeah.');
       await pumpEventQueue();
-      expect(brain.turns.single, {'text': 'Yes, all out.'});
-      await playOut();
+      stt.hear('With the table.');
+      await pumpEventQueue();
+      expect(brain.turns, isEmpty);
+      expect(loop.state.flame, FlameState.waiting);
     });
 
     test('the wake word engine opens a turn and silences Sous', () async {
@@ -574,6 +581,7 @@ void main() {
         text('Chef, the recipe says twelve minutes. Set it?'),
         doneAwaiting(short),
       ]);
+      await loop.openTurn();
       stt.hear('Rice is in.');
       await pumpEventQueue();
       await playOut();
@@ -613,6 +621,7 @@ void main() {
       await loop.start();
       await playOut();
       brain.replies.add([text('Set it?'), doneAwaiting(short)]);
+      await loop.openTurn();
       stt.hear('Rice is in.');
       await pumpEventQueue();
       await playOut();
@@ -627,6 +636,7 @@ void main() {
       await playOut();
       final said = tts.said.length;
       brain.replies.add([done('end_turn')]);
+      await loop.openTurn();
       stt.hear('Heard, Chef.');
       await pumpEventQueue();
       await pumpEventQueue();
@@ -748,10 +758,17 @@ void main() {
     expect(afterWakePhrase('Hey, Sue. How long?'), 'How long?');
     expect(afterWakePhrase('Sous, next step'), isNull);
     expect(afterWakePhrase('They sued the chef'), isNull);
-    for (final phrase in ['Heard', 'Yes, Chef', 'Got it.', 'Yep, ten']) {
+    for (final phrase in [
+      'Heard',
+      'Heard, Chef.',
+      'Yes, Chef',
+      'Got it, Chef',
+    ]) {
       expect(isAcknowledgement(phrase), isTrue, reason: phrase);
     }
-    expect(isAcknowledgement('The kids are home'), isFalse);
+    for (final phrase in ['Yeah.', 'Heard you were at the match today']) {
+      expect(isAcknowledgement(phrase), isFalse, reason: phrase);
+    }
   });
 
   test('fails to start without the microphone', () async {

@@ -129,8 +129,8 @@ class VoiceLoopSettings {
   /// How long after Sous stops that the mic may still be hearing Sous.
   final Duration echoTail;
 
-  /// How long the chef can talk without "Hey Sous" after opening a turn or
-  /// after Sous finishes speaking, so "Heard" and follow-ups get through.
+  /// How long after "Hey Sous" or a tap the chef's words still go to Sous,
+  /// so they can pause or add to what they said.
   final Duration listenFor;
 
   /// See [ackRepeatGaps].
@@ -363,7 +363,7 @@ class VoiceLoop {
     switch (event) {
       case SpeechStarted():
         _hearing = true;
-        _speechInTurn = _turnOpen || _sessionBusy;
+        _speechInTurn = _turnOpen;
         _overlapsSous = _sousAudible;
         if (settings.duplex == DuplexMode.full && _sousSpeaking) {
           unawaited(silence());
@@ -400,14 +400,13 @@ class VoiceLoop {
       return;
     }
     if ((_sousSpeaking || _sessionBusy) && isStopCommand(text)) {
-      _keepListening();
       unawaited(silence());
       return;
     }
     if (overlapsSous && settings.duplex == DuplexMode.half) return;
     final answersSous =
         _session.state.awaitingAck != null && isAcknowledgement(text);
-    if (!inTurn && !_sessionBusy && !answersSous) return;
+    if (!inTurn && !answersSous) return;
     _stopRepeating(answered: true);
     if (_sousSpeaking) unawaited(silence());
     _take(text);
@@ -425,7 +424,6 @@ class VoiceLoop {
     _wantsEvents = false;
     if (text == null && !events) return;
     _pending = null;
-    _openUntil = null;
     if (text != null) _emit(_copy(heard: text));
     unawaited(_session.send(text: text).catchError((Object e) => _report(e)));
   }
@@ -552,10 +550,7 @@ class VoiceLoop {
       _playedUntil = _clock();
     }
     _pumping = false;
-    if (_running && _queue.isEmpty) {
-      _keepListening();
-      _scheduleRepeat();
-    }
+    if (_running && _queue.isEmpty) _scheduleRepeat();
     _update();
   }
 
@@ -574,7 +569,7 @@ class VoiceLoop {
     final chefTalking =
         _hearing &&
         !(_overlapsSous && _sousSpeaking) &&
-        (_speechInTurn || _turnOpen || _sessionBusy);
+        (_speechInTurn || _turnOpen);
     final status = chefTalking
         ? VoiceStatus.hearing
         : _sousSpeaking
@@ -610,15 +605,22 @@ class VoiceLoop {
   }
 }
 
-/// Whether [text] starts like the chef answering an instruction: "Heard",
-/// "Yes, Chef", "Got it" and the like. The brain decides whether it really
-/// closes it; this only lets it through without "Hey Sous".
-bool isAcknowledgement(String text) => _acknowledgement.hasMatch(text.trim());
+/// Whether [text] is the chef answering an instruction on its own:
+/// "Heard", "Yes, Chef", "Got it, Chef" and the like. It's strict, since it
+/// lets words through without "Hey Sous" and a busy kitchen says "yeah" a
+/// lot. The brain decides whether it really closes the instruction.
+bool isAcknowledgement(String text) {
+  final words = text
+      .toLowerCase()
+      .replaceAll(RegExp(r"[^a-z' ]"), ' ')
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .toList();
+  return words.length <= 4 && _acknowledgement.hasMatch(words.join(' '));
+}
 
 final _acknowledgement = RegExp(
-  r"^(?:heard|yes|yeah|yep|yup|ok|okay|got it|understood|copy|on it|will do|"
-  r"sure|done|cheers|thanks|no|nope|not yet)\b",
-  caseSensitive: false,
+  r"^(?:heard|yes chef|oui chef|got it chef|understood|copy that)\b",
 );
 
 /// Whether [text] is the cook asking Sous to stop talking.
