@@ -126,6 +126,22 @@ function apiError(type: string, message: string) {
   return { type: "error", error: { type, message } };
 }
 
+/** A raw reflection as Opus might return it, untidy on purpose. */
+export const fakeReflection = {
+  rating: 3,
+  summary: "  Golden toastie,   cheese a touch underdone. ",
+  worked: ["Buttering edge to edge", "Buttering edge to edge", " "],
+  failed: ["Lower the heat so the cheese melts first"],
+  substitutions: [
+    { original: "Cheddar", replacement: "Red Leicester", outcome: "Melted well" },
+    { original: "", replacement: "nothing", outcome: "" },
+  ],
+  preferences: ["Hates coriander"],
+  ingredients: ["Bread", "bread ", "Red Leicester"],
+  techniques: ["Toasting"],
+  cuisine: "British",
+};
+
 /** Reads a server-sent event stream into its events' data. */
 export async function readEvents<T = unknown>(response: Response): Promise<T[]> {
   const text = await response.text();

@@ -1,15 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 import type Anthropic from "@anthropic-ai/sdk";
-import type { Recipe, StreamEvent, Turn, TurnRequest } from "@sous/contracts";
+import type { Recipe, Session, StreamEvent, Turn, TurnRequest } from "@sous/contracts";
 import { createClient, liveModel } from "./claude";
 import { error, HttpError } from "./http";
 import { applyPreferences, USER_MD, type Preferences, type Profile, type ProfilePatch } from "./profile";
 import { assembleContext, MAX_LINKED_NOTES, MEMORY_MD, openingLine, recipeNotePath, type Note } from "./prompt";
 import { fromRow, slugify, toRow, type NewRecipe, type RecipeRow } from "./recipes";
+import { isRetryable, reflect, type EndRequest, type Rating, type Reflection } from "./reflection";
 import { migrate } from "./schema";
 import { demoRecipe, starterAbout, starterPreferences } from "./seed";
 import { appendTurnRequest, requestTurns, sse, type NewSession, type SessionRow } from "./sessions";
 import { runTurn, type TurnOutcome } from "./turn";
+import { writeReflection } from "./vault";
 
 interface NoteRow extends Record<string, SqlStorageValue> {
   path: string;
@@ -19,6 +21,28 @@ interface NoteRow extends Record<string, SqlStorageValue> {
 
 const SSE_HEADERS = { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform" };
 const TURN_FAILED = "Sou lost the thread there. Try that again.";
+const REFLECTION_DELAY_MS = 5_000;
+const REFLECTION_TIMEOUT_MS = 10 * 60_000;
+
+export type ReflectionStatus = "not_ended" | "pending" | "done" | "failed";
+
+/** The reflection as saved on the session, with the path of the session note it wrote. */
+export type SavedReflection = Reflection & { note: string };
+
+export interface EndedSession {
+  id: string;
+  ended_at: string;
+  rating?: Rating;
+  notes?: string;
+  reflection_status: "pending";
+}
+
+export interface SessionView {
+  session: Session;
+  reflection: SavedReflection | null;
+  reflection_status: ReflectionStatus;
+  reflected_at: string | null;
+}
 
 interface FileRow extends Record<string, SqlStorageValue> {
   frontmatter: string;
@@ -163,6 +187,84 @@ export class UserBrain extends DurableObject<Env> {
     })();
     this.ctx.waitUntil(work);
     return new Response(readable, { headers: SSE_HEADERS });
+  }
+
+  /** Closes a session and schedules its reflection a few seconds later on the Durable Object's alarm. */
+  async endSession(sessionId: string, request: EndRequest): Promise<EndedSession | "session_not_found" | "session_ended" | "turn_in_progress"> {
+    this.init();
+    const row = this.getSessionRow(sessionId);
+    if (!row) return "session_not_found";
+    if (row.ended_at) return "session_ended";
+    if (this.busySessions.has(sessionId)) return "turn_in_progress";
+    const endedAt = new Date().toISOString();
+    this.sql.exec("UPDATE sessions SET ended_at = ?, rating = ?, notes = ? WHERE id = ?", endedAt, request.rating ?? null, request.notes ?? null, sessionId);
+    const at = Date.now() + REFLECTION_DELAY_MS;
+    const scheduled = await this.ctx.storage.getAlarm();
+    if (scheduled === null || scheduled > at) await this.ctx.storage.setAlarm(at);
+    return { id: sessionId, ended_at: endedAt, ...request, reflection_status: "pending" };
+  }
+
+  getSession(sessionId: string): SessionView | null {
+    this.init();
+    const row = this.getSessionRow(sessionId);
+    if (!row) return null;
+    const session: Session = {
+      id: row.id,
+      recipe_id: row.recipe_id,
+      stage: row.stage as Session["stage"],
+      started_at: row.started_at,
+      ...(row.ended_at ? { ended_at: row.ended_at } : {}),
+      turns: JSON.parse(row.turns),
+      facts: JSON.parse(row.facts),
+      ...(row.rating ? { rating: row.rating as Rating } : {}),
+      ...(row.notes ? { notes: row.notes } : {}),
+    };
+    const status: ReflectionStatus = !row.ended_at ? "not_ended" : row.reflected_at ? "done" : row.reflection_error ? "failed" : "pending";
+    return { session, reflection: row.reflection ? JSON.parse(row.reflection) : null, reflection_status: status, reflected_at: row.reflected_at };
+  }
+
+  /** Reflects on every ended session that hasn't been yet. Throwing makes Cloudflare retry the alarm with backoff. */
+  async alarm(): Promise<void> {
+    this.init();
+    const pending = this.sql
+      .exec<SessionRow>("SELECT * FROM sessions WHERE ended_at IS NOT NULL AND reflected_at IS NULL AND reflection_error IS NULL ORDER BY ended_at, rowid")
+      .toArray();
+    if (!pending.length) return;
+    if (!this.env.ANTHROPIC_API_KEY) {
+      console.warn(JSON.stringify({ event: "sous_reflection_skipped", reason: "no_api_key", pending: pending.length }));
+      return;
+    }
+    const client = createClient(this.env.ANTHROPIC_API_KEY, REFLECTION_TIMEOUT_MS);
+    let retry = false;
+    for (const row of pending) {
+      try {
+        await this.reflectSession(client, row);
+      } catch (e) {
+        const retryable = isRetryable(e);
+        console.error(JSON.stringify({ event: "sous_reflection_failed", session_id: row.id, retryable, error: String(e) }));
+        if (retryable) retry = true;
+        else this.sql.exec("UPDATE sessions SET reflection_error = ? WHERE id = ?", e instanceof Error ? e.message : String(e), row.id);
+      }
+    }
+    if (retry) throw new Error("Some reflections failed and will be retried.");
+  }
+
+  private async reflectSession(client: Anthropic, row: SessionRow): Promise<void> {
+    const started = Date.now();
+    const recipe = this.getRecipe(row.recipe_id);
+    const { preferences, about } = this.getProfile();
+    const rating = (row.rating as Rating | null) ?? null;
+    const { reflection, usage } = await reflect(client, { recipe, user: { preferences, about }, turns: JSON.parse(row.turns), facts: JSON.parse(row.facts), rating, notes: row.notes });
+    const note = this.ctx.storage.transactionSync(() => {
+      const current = this.getSessionRow(row.id);
+      if (!current || current.reflected_at) return null;
+      const now = new Date().toISOString();
+      const path = writeReflection(this.sql, { id: row.id, started_at: row.started_at, recipe, notes: row.notes, reflection }, now);
+      const saved: SavedReflection = { ...reflection, note: path };
+      this.sql.exec("UPDATE sessions SET reflected_at = ?, reflection = ? WHERE id = ?", now, JSON.stringify(saved), row.id);
+      return path;
+    });
+    console.log(JSON.stringify({ event: "sous_reflection", session_id: row.id, note, total_ms: Date.now() - started, usage }));
   }
 
   private getSessionRow(id: string): SessionRow | undefined {

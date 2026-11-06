@@ -17,6 +17,8 @@ Everything lives under `/sous/api/v1` and needs a WorkOS access token as `Author
 | `DELETE /recipes/:id` | `204`, or `404` |
 | `POST /sessions` | `{recipe_id}`. Starts a live cooking session: `201 {id, recipe_id, stage, started_at, opening_line}`, or `404` for an unknown recipe |
 | `POST /sessions/:id/turns` | a `TurnRequest` from `packages/contracts`. Streams Sou's reply as server-sent events (`text`, `tool_call`, then `done` or `error`). `409 tool_results_required` lists the tool call ids still owed, `409 session_ended`, `409 turn_in_progress` |
+| `POST /sessions/:id/end` | `{rating?, notes?}` (rating 1 to 5, notes up to 4,000 characters; the body can be empty). Closes the session and queues its reflection: `202 {id, ended_at, rating?, notes?, reflection_status: "pending"}`. `409 session_ended`, `409 turn_in_progress`, `404` |
+| `GET /sessions/:id` | `{session, reflection, reflection_status, reflected_at}`. `session` is a contract `Session` (the transcript, facts, rating and notes); `reflection` is null until it's done. `reflection_status` is `not_ended`, `pending`, `done` or `failed` |
 
 ## Live cooking sessions
 
@@ -26,15 +28,28 @@ Each turn sends Claude the tools, then the stage prompt and context (cached with
 
 A turn is saved only once the reply finishes, so after an `error` event the cook can resend the same turn. The session row keeps the raw Claude `messages` (thinking blocks included, passed back unchanged), the contract `turns` transcript, `facts` and the current `stage`. Every turn logs a `sous_turn` line with `first_text_ms`, `total_ms` and token usage including cache reads, which is how to measure time to first token.
 
+## Post-cook reflection
+
+`/end` saves the rating and notes, sets `ended_at` and schedules the Durable Object's alarm five seconds out, so it returns straight away. The alarm reflects on every ended session that hasn't been yet: one `claude-opus-5-5` call (`src/reflection.ts`, effort `high`, adaptive thinking, structured output against `reflectionSchema`) reads the recipe, `USER.md`, the transcript, the `note` facts and the cook's rating and notes, and returns the rating, a summary, what worked and failed, swaps, new preferences, and the ingredients, techniques and cuisine. The cook's own rating always wins over the model's. Code checks the output against the schema, tidies it (trimmed, deduplicated, lowercase names) and writes the vault in one transaction (`src/vault.ts`):
+
+- `sessions/<date>-<recipe slug>-<id prefix>.md`: the whole reflection, linking the recipe, ingredients, techniques and cuisine. Dates are London days.
+- `recipes/<slug>.md`: a line per cook under `## Cooks`, plus `## Next time`, `## Swaps`, `## Ingredients`, `## Techniques` and `## Cuisine`, and `times_cooked` and `last_cooked` in its frontmatter. Anything else in the note is kept.
+- `ingredients/`, `techniques/` and `cuisines/<slug>.md`: a line per cook under `## Cooked in`.
+- `USER.md`: new preferences under `## Learned while cooking`, skipping ones already there.
+
+Every per-cook line carries the session's `[[wikilink]]`, and a rerun replaces that session's lines rather than adding more, so reflecting twice changes nothing. After writing, `links` is rebuilt from every note's `[[wikilinks]]` (`src/wikilinks.ts`), with the link's `kind` taken from the folder it points into. The next `POST /sessions` for that recipe picks all of it up through context assembly.
+
+If Claude is down or rate limited the alarm throws and Cloudflare retries it with backoff; a later `/end` also picks up anything still pending. A refusal or output that doesn't fit the schema won't improve on retry, so it's saved as `reflection_error` and the session shows `failed`. Each reflection logs a `sous_reflection` line with its timing and token usage.
+
 ## Storage
 
-`src/schema.ts` holds the migrations, applied on first use inside each Durable Object and tracked in `schema_migrations`. Add a migration by appending to the list; never edit one that has shipped. The tables are `recipes`, `files` (the vault, with `USER.md` as the profile), `links` and `sessions`, as the architecture card defines them, plus `model`, `context`, `turns` and `facts` on `sessions` for live cooking. A fresh brain gets a starter `USER.md` and one obviously fake demo recipe (`src/seed.ts`).
+`src/schema.ts` holds the migrations, applied on first use inside each Durable Object and tracked in `schema_migrations`. Add a migration by appending to the list; never edit one that has shipped. The tables are `recipes`, `files` (the vault, with `USER.md` as the profile), `links` and `sessions`, as the architecture card defines them, plus `model`, `context`, `turns` and `facts` on `sessions` for live cooking, and `rating`, `notes` and `reflection_error` for reflection. A fresh brain gets a starter `USER.md` and one obviously fake demo recipe (`src/seed.ts`).
 
 ## Config
 
 - `WORKOS_CLIENT_ID` (var in `wrangler.jsonc`): the shared AuthKit application's production client id. Public.
 - `WORKOS_API_KEY` (secret, declared in `wrangler.jsonc`, never committed): only `DELETE /me` uses it, and it returns `503` without it. For local dev put it in `.dev.vars` (see `.dev.vars.example`).
-- `ANTHROPIC_API_KEY` (secret, declared the same way): the sessions routes return `503 live_sessions_unavailable` without it.
+- `ANTHROPIC_API_KEY` (secret, declared the same way): starting sessions and taking turns return `503 live_sessions_unavailable` without it. Ending a session still works, and its reflection waits until the key is set and another session ends.
 - `SOUS_LIVE_MODEL` (var in `wrangler.jsonc`): the model for live turns, `claude-sonnet-5-5`. Set it to `claude-haiku-5-5` if Sonnet's time to first token is too slow; new sessions pick it up.
 
 `wrangler.jsonc` routes `build40for40.com/sous/api` and `build40for40.com/sous/api/*` on the `build40for40.com` zone, the same pattern as Sidekick. The rest of `/sous` is left for the landing page.

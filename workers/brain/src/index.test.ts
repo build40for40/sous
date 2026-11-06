@@ -1,13 +1,14 @@
 import { env, exports } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
-import type { Recipe, StreamEvent, Turn } from "@sous/contracts";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { Validator, type Schema } from "@cfworker/json-schema";
+import { sessionSchema, type Recipe, type StreamEvent, type Turn } from "@sous/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserBrain } from "./brain";
 import { BASE_PATH } from "./http";
 import worker from "./index";
 import { STAGE_PROMPT } from "./prompt";
 import { demoRecipe } from "./seed";
-import { mockClaude, mockWorkos, readEvents, signToken, type WorkosMock } from "./testing";
+import { fakeReflection, mockClaude, mockWorkos, readEvents, signToken, type WorkosMock } from "./testing";
 
 let workos: WorkosMock;
 beforeEach(() => {
@@ -432,5 +433,99 @@ describe("/sessions", () => {
     const response = await call(`/sessions/${id}/turns`, { user, method: "POST", body: { text: "One more thing" } });
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: "session_ended" });
+  });
+
+  describe("ending a session", () => {
+    const stub = (user: string) => env.USER_BRAIN.get(env.USER_BRAIN.idFromName(user));
+    const { $id, ...withoutId } = sessionSchema;
+    const sessionValidator = new Validator(withoutId as unknown as Schema, "2020-12", false);
+
+    it("closes the session straight away and reflects in the background, and the next session picks it up", async () => {
+      const user = "user_reflectFull";
+      const id = await startSession(user);
+      mockClaude(
+        { content: [{ type: "tool_use", id: "toolu_hate", name: "note", input: { fact: "Hates coriander" } }] },
+        { content: [{ type: "text", text: "Got it. Swap the cheddar for red leicester, that'll melt lovely." }] },
+      );
+      await turn(user, id, { text: "No coriander ever please, and I've only got red leicester." });
+
+      const claude = mockClaude({ content: [{ type: "text", text: JSON.stringify(fakeReflection) }] });
+      const ended = await call(`/sessions/${id}/end`, { user, method: "POST", body: { rating: 5, notes: "Lush, but a bit pale." } });
+      expect(ended.status).toBe(202);
+      expect(await ended.json()).toEqual({ id, ended_at: expect.any(String), rating: 5, notes: "Lush, but a bit pale.", reflection_status: "pending" });
+      expect(claude.requests).toEqual([]);
+
+      const pending = await (await call(`/sessions/${id}`, { user })).json<{ session: unknown; reflection: unknown; reflection_status: string }>();
+      expect(pending).toMatchObject({ reflection: null, reflection_status: "pending", reflected_at: null });
+      expect(sessionValidator.validate(pending.session).valid).toBe(true);
+      expect(pending.session).toMatchObject({ id, rating: 5, notes: "Lush, but a bit pale.", facts: ["Hates coriander"] });
+
+      expect(await runDurableObjectAlarm(stub(user))).toBe(true);
+      expect(claude.requests).toHaveLength(1);
+      expect(claude.requests[0]).toMatchObject({ model: "claude-opus-5-5", output_config: { format: { type: "json_schema" } } });
+      const sent = claude.requests[0].messages[0].content as string;
+      for (const text of ["Cook: No coriander ever please, and I've only got red leicester.", "- Hates coriander", "5 out of 5", "Lush, but a bit pale.", demoRecipe.title]) {
+        expect(sent).toContain(text);
+      }
+
+      const done = await (await call(`/sessions/${id}`, { user })).json<{ session: { turns: Turn[] }; reflection: Record<string, unknown>; reflection_status: string; reflected_at: string }>();
+      expect(done.reflection_status).toBe("done");
+      expect(done.reflected_at).toEqual(expect.any(String));
+      expect(done.session.turns.map((t) => t.role)).toEqual(["sous", "cook", "sous", "tool", "sous"]);
+      expect(done.reflection).toMatchObject({
+        rating: 5,
+        summary: "Golden toastie, cheese a touch underdone.",
+        preferences: ["Hates coriander"],
+        ingredients: ["bread", "red leicester"],
+        cuisine: "british",
+        note: expect.stringMatching(/^sessions\/\d{4}-\d{2}-\d{2}-fake-demo-cheese-toastie-[0-9a-f]{8}\.md$/),
+      });
+
+      const me = await (await call("/me", { user })).json<{ about: string }>();
+      expect(me.about).toContain("## Learned while cooking\n\n- Hates coriander");
+
+      const next = await startSession(user);
+      const nextClaude = mockClaude({ content: [{ type: "text", text: "Back for another?" }] });
+      await turn(user, next, { text: "Toastie again" });
+      const context = nextClaude.requests[0].system[1].text as string;
+      for (const text of [
+        "Hates coriander",
+        "Golden toastie, cheese a touch underdone.",
+        "red leicester instead of cheddar: Melted well",
+        `## ${done.reflection.note}`,
+        "## ingredients/red-leicester.md",
+        "## cuisines/british.md",
+      ]) {
+        expect(context).toContain(text);
+      }
+    });
+
+    it("needs no body, and won't end a session twice or take turns after", async () => {
+      const user = "user_reflectTwice";
+      const id = await startSession(user);
+      expect((await call(`/sessions/${id}/end`, { user, method: "POST" })).status).toBe(202);
+      const again = await call(`/sessions/${id}/end`, { user, method: "POST", body: { rating: 3 } });
+      expect(again.status).toBe(409);
+      expect(await again.json()).toEqual({ error: "session_ended" });
+      expect((await call(`/sessions/${id}/turns`, { user, method: "POST", body: { text: "Hi" } })).status).toBe(409);
+      expect(await (await call(`/sessions/${id}`, { user })).json()).toMatchObject({ session: { ended_at: expect.any(String) }, reflection_status: "pending" });
+      mockClaude({ content: [{ type: "text", text: JSON.stringify(fakeReflection) }] });
+      await runDurableObjectAlarm(stub(user));
+    });
+
+    it("rejects bad requests and keeps sessions to their owner", async () => {
+      const user = "user_reflectBad";
+      const id = await startSession(user);
+      expect((await call(`/sessions/${id}/end`, { user, method: "POST", body: { rating: 6 } })).status).toBe(400);
+      expect((await call(`/sessions/${id}/end`, { user, method: "POST", body: { mood: "great" } })).status).toBe(400);
+      expect((await call(`/sessions/${id}/end`, { user, method: "POST", body: "{nope" })).status).toBe(400);
+      expect((await call(`/sessions/${id}/end`, { user })).status).toBe(405);
+      expect((await call(`/sessions/${id}`, { user, method: "DELETE" })).status).toBe(405);
+      expect((await call("/sessions/nope/end", { user, method: "POST" })).status).toBe(404);
+      expect((await call("/sessions/nope", { user })).status).toBe(404);
+      expect((await call(`/sessions/${id}`, { user: "user_reflectOther" })).status).toBe(404);
+      expect((await call(`/sessions/${id}/end`, { user: "user_reflectOther", method: "POST" })).status).toBe(404);
+      expect(await (await call(`/sessions/${id}`, { user })).json()).toMatchObject({ reflection_status: "not_ended", reflection: null });
+    });
   });
 });

@@ -45,6 +45,11 @@ const migrations: string[] = [
   ALTER TABLE sessions ADD COLUMN turns TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE sessions ADD COLUMN facts TEXT NOT NULL DEFAULT '[]';
   `,
+  `
+  ALTER TABLE sessions ADD COLUMN rating INTEGER;
+  ALTER TABLE sessions ADD COLUMN notes TEXT;
+  ALTER TABLE sessions ADD COLUMN reflection_error TEXT;
+  `,
 ];
 
 export const SCHEMA_VERSION = migrations.length;
